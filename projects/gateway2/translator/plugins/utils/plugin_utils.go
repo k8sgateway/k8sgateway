@@ -87,7 +87,7 @@ func GetExtensionRefObj[T client.Object](
 	queries query.GatewayQueries,
 	extensionRef *gwv1.LocalObjectReference,
 ) (T, error) {
-	return GetExtensionRefObjFrom[T](ctx, queries.ObjToFrom(route), queries, extensionRef)
+	return GetExtensionRefObjFrom[T](ctx, query.FromRoute(route), queries, extensionRef)
 }
 
 func GetExtensionRefObjFrom[T client.Object](

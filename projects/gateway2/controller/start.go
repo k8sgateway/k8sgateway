@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 
+	"istio.io/istio/pkg/kube"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/config"
 
@@ -120,6 +121,7 @@ func Start(ctx context.Context, cfg StartConfig) error {
 	// TODO: replace this with something that checks that we have xds snapshot ready (or that we don't need one).
 	mgr.AddReadyzCheck("ready-ping", healthz.Ping)
 
+	istioClient := newIstioClient(mgr)
 	inputChannels := proxy_syncer.NewGatewayInputChannels()
 	k8sGwExtensions, err := cfg.ExtensionsFactory(ctx, ext.K8sGatewayExtensionsFactoryParameters{
 		Mgr:                     mgr,
@@ -127,6 +129,7 @@ func Start(ctx context.Context, cfg StartConfig) error {
 		VirtualHostOptionClient: cfg.VirtualHostOptionClient,
 		StatusReporter:          cfg.KubeGwStatusReporter,
 		AuthConfigClient:        cfg.AuthConfigClient,
+		IstioClient:             istioClient,
 		KickXds:                 inputChannels.Kick,
 	})
 	if err != nil {
@@ -135,6 +138,7 @@ func Start(ctx context.Context, cfg StartConfig) error {
 	}
 	// Create the proxy syncer for the Gateway API resources
 	proxySyncer := proxy_syncer.NewProxySyncer(
+		istioClient,
 		wellknown.GatewayControllerName,
 		cfg.Opts.WriteNamespace,
 		inputChannels,
@@ -170,4 +174,16 @@ func Start(ctx context.Context, cfg StartConfig) error {
 	}
 
 	return mgr.Start(ctx)
+}
+
+func newIstioClient(mgr ctrl.Manager) kube.Client {
+	restCfg := kube.NewClientConfigForRestConfig(mgr.GetConfig())
+	client, err := kube.NewClient(restCfg, "")
+	if err != nil {
+		// TODO: the istio kube client creation will be moved earlier in the flow in a follow-up,
+		// so this will be able to be handled appropriately shortly
+		panic(err)
+	}
+	kube.EnableCrdWatcher(client)
+	return client
 }

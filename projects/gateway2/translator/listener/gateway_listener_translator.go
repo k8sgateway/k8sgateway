@@ -21,7 +21,6 @@ import (
 	"github.com/solo-io/gloo/projects/gloo/pkg/api/v1/ssl"
 	"github.com/solo-io/gloo/projects/gloo/pkg/utils"
 	"github.com/solo-io/solo-kit/pkg/api/v1/resources/core"
-	corev1 "k8s.io/api/core/v1"
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
@@ -475,19 +474,19 @@ func translateSslConfig(
 	var secretRef *core.ResourceRef
 	for _, certRef := range tls.CertificateRefs {
 		// validate via query
-		secret, err := queries.GetSecretForRef(ctx, query.FromGkNs{
-			Gk: metav1.GroupKind{
+		secret, err := queries.GetSecretForRef(ctx, query.From{
+			GroupKind: metav1.GroupKind{
 				Group: gwv1.GroupName,
 				Kind:  "Gateway",
 			},
-			Ns: parentNamespace,
+			Namespace: parentNamespace,
 		}, certRef)
 		if err != nil {
 			return nil, err
 		}
 		// The resulting sslconfig will still have to go through a real translation where we run through this again.
 		// This means that while its nice to still fail early here we dont need to scrub the actual contents of the secret.
-		if _, err := sslutils.ValidateTlsSecret(secret.(*corev1.Secret)); err != nil {
+		if _, err := sslutils.ValidateTlsSecret(secret); err != nil {
 			return nil, err
 		}
 

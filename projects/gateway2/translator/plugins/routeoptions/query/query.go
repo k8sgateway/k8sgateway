@@ -15,6 +15,7 @@ import (
 
 	sologatewayv1 "github.com/solo-io/gloo/projects/gateway/pkg/api/v1"
 	solokubev1 "github.com/solo-io/gloo/projects/gateway/pkg/api/v1/kube/apis/gateway.solo.io/v1"
+	"github.com/solo-io/gloo/projects/gateway2/query"
 	gwquery "github.com/solo-io/gloo/projects/gateway2/query"
 	"github.com/solo-io/gloo/projects/gateway2/translator/plugins/utils"
 	gloov1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1"
@@ -141,9 +142,8 @@ func lookupFilterAttachments(
 
 	var out []*solokubev1.RouteOption
 	var multiErr *multierror.Error
-	extLookup := extensionRefLookup{namespace: route.Namespace}
 	for _, filter := range filters {
-		routeOption, err := utils.GetExtensionRefObjFrom[*solokubev1.RouteOption](ctx, extLookup, gwQueries, filter.ExtensionRef)
+		routeOption, err := utils.GetExtensionRefObjFrom[*solokubev1.RouteOption](ctx, fromRouteOption(route.Namespace), gwQueries, filter.ExtensionRef)
 		if err != nil {
 			// If the filter is not found, report a specific error so that it can reflect more
 			// clearly on the status of the HTTPRoute.
@@ -160,19 +160,14 @@ func lookupFilterAttachments(
 	return out, multiErr.ErrorOrNil()
 }
 
-type extensionRefLookup struct {
-	namespace string
-}
-
-func (e extensionRefLookup) GroupKind() (metav1.GroupKind, error) {
-	return metav1.GroupKind{
-		Group: routeOptionGK.Group,
-		Kind:  routeOptionGK.Kind,
-	}, nil
-}
-
-func (e extensionRefLookup) Namespace() string {
-	return e.namespace
+func fromRouteOption(namespace string) query.From {
+	return query.From{
+		Namespace: namespace,
+		GroupKind: metav1.GroupKind{
+			Group: routeOptionGK.Group,
+			Kind:  routeOptionGK.Kind,
+		},
+	}
 }
 
 func errFilterNotFound(namespace string, filter *gwv1.HTTPRouteFilter) error {

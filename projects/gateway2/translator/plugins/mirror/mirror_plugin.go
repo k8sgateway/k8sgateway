@@ -47,7 +47,7 @@ func (p *plugin) ApplyRoutePlugin(
 		return errors.Errorf("RequestMirror must have destinations")
 	}
 
-	obj, err := p.queries.GetBackendForRef(ctx, p.queries.ObjToFrom(routeCtx.Route), &config.BackendRef)
+	obj, err := p.queries.GetBackendForRef(ctx, query.FromRoute(routeCtx.Route), &config.BackendRef)
 	clusterName := query.ProcessBackendRef(
 		obj,
 		err,
@@ -55,7 +55,7 @@ func (p *plugin) ApplyRoutePlugin(
 		config.BackendRef,
 	)
 	if clusterName == nil {
-		return nil //TODO https://github.com/solo-io/gloo/pull/8890/files#r1391523183
+		return nil // TODO https://github.com/solo-io/gloo/pull/8890/files#r1391523183
 	}
 
 	switch {

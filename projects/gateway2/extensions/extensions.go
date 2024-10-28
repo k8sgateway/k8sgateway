@@ -4,11 +4,13 @@ import (
 	"context"
 
 	gatewayv1 "github.com/solo-io/gloo/projects/gateway/pkg/api/v1"
+	"github.com/solo-io/gloo/projects/gateway2/krtquery"
 	"github.com/solo-io/gloo/projects/gateway2/query"
 	"github.com/solo-io/gloo/projects/gateway2/translator"
 	"github.com/solo-io/gloo/projects/gateway2/translator/plugins/registry"
 	v1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1/enterprise/options/extauth/v1"
 	"github.com/solo-io/solo-kit/pkg/api/v2/reporter"
+	"istio.io/istio/pkg/kube"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	apiv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
@@ -26,6 +28,7 @@ type K8sGatewayExtensions interface {
 
 // K8sGatewayExtensionsFactoryParameters contains the parameters required to start Gloo K8s Gateway Extensions (including Translator Plugins)
 type K8sGatewayExtensionsFactoryParameters struct {
+	IstioClient             kube.Client
 	Mgr                     controllerruntime.Manager
 	AuthConfigClient        v1.AuthConfigClient
 	RouteOptionClient       gatewayv1.RouteOptionClient
@@ -42,13 +45,14 @@ type K8sGatewayExtensionsFactory func(
 
 // NewK8sGatewayExtensions returns the Open Source implementation of K8sGatewayExtensions
 func NewK8sGatewayExtensions(
-	_ context.Context,
+	ctx context.Context,
 	params K8sGatewayExtensionsFactoryParameters,
 ) (K8sGatewayExtensions, error) {
-	queries := query.NewData(
-		params.Mgr.GetClient(),
-		params.Mgr.GetScheme(),
-	)
+	// queries := query.NewData(
+	// 	params.Mgr.GetClient(),
+	// 	params.Mgr.GetScheme(),
+	// )
+	queries := krtquery.New(ctx, params.IstioClient)
 
 	return &k8sGatewayExtensions{
 		mgr:                     params.Mgr,

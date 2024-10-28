@@ -12,6 +12,9 @@ const (
 	// Kind string for k8s service
 	ServiceKind = "Service"
 
+	// Kind string for k8s secret
+	SecretKind = "Secret"
+
 	// Kind string for HTTPRoute resource
 	HTTPRouteKind = "HTTPRoute"
 

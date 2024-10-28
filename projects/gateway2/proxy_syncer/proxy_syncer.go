@@ -39,6 +39,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/solo-io/gloo/pkg/utils/statsutils"
 	"github.com/solo-io/gloo/projects/gateway2/extensions"
+	"github.com/solo-io/gloo/projects/gateway2/krtquery"
 	"github.com/solo-io/gloo/projects/gateway2/reports"
 	gwplugins "github.com/solo-io/gloo/projects/gateway2/translator/plugins"
 	"github.com/solo-io/gloo/projects/gateway2/translator/plugins/registry"
@@ -108,6 +109,7 @@ var kubeGatewayProxyLabels = map[string]string{
 // NewProxySyncer returns an implementation of the ProxySyncer
 // The provided GatewayInputChannels are used to trigger syncs.
 func NewProxySyncer(
+	client kube.Client,
 	controllerName string,
 	writeNamespace string,
 	inputs *GatewayInputChannels,
@@ -121,15 +123,6 @@ func NewProxySyncer(
 	legacySecretClient gloov1.SecretClient,
 	glooReporter reporter.StatusReporter,
 ) *ProxySyncer {
-	restCfg := kube.NewClientConfigForRestConfig(mgr.GetConfig())
-	client, err := kube.NewClient(restCfg, "")
-	if err != nil {
-		// TODO: the istio kube client creation will be moved earlier in the flow in a follow-up,
-		// so this will be able to be handled appropriately shortly
-		panic(err)
-	}
-	kube.EnableCrdWatcher(client)
-
 	return &ProxySyncer{
 		controllerName:     controllerName,
 		writeNamespace:     writeNamespace,
@@ -186,6 +179,7 @@ var _ krt.ResourceNamer = xdsSnapWrapper{}
 func (p xdsSnapWrapper) Equals(in xdsSnapWrapper) bool {
 	return p.snap.Equal(in.snap)
 }
+
 func (p xdsSnapWrapper) ResourceName() string {
 	return p.proxyKey
 }
@@ -213,6 +207,7 @@ func (p glooProxy) Equals(in glooProxy) bool {
 	}
 	return true
 }
+
 func (p glooProxy) ResourceName() string {
 	return xds.SnapshotCacheKey(p.proxy)
 }
@@ -251,6 +246,7 @@ type upstream struct {
 func (us upstream) ResourceName() string {
 	return us.Metadata.GetName() + "/" + us.Metadata.GetNamespace()
 }
+
 func (us upstream) Equals(in upstream) bool {
 	return proto.Equal(us, in)
 }
@@ -373,6 +369,7 @@ func (s *ProxySyncer) Start(ctx context.Context) error {
 
 	glooProxies := krt.NewCollection(kubeGateways, func(kctx krt.HandlerContext, gw *gwv1.Gateway) *glooProxy {
 		proxyTrigger.MarkDependant(kctx)
+		ctx := krtquery.WithKRT(ctx, kctx)
 		proxy := s.buildProxy(ctx, gw)
 		return proxy
 	})
@@ -478,7 +475,7 @@ func (s *ProxySyncer) Start(ctx context.Context) error {
 	}
 
 	timer := time.NewTicker(time.Second * 1)
-	var needsProxyRecompute = false
+	needsProxyRecompute := false
 	for {
 		select {
 		case <-ctx.Done():
@@ -758,7 +755,7 @@ func (s *ProxySyncer) syncRouteStatus(ctx context.Context, rm reports.ReportMap)
 	// Sometimes the List returns stale (cached) httproutes, causing the status update to fail
 	// with "the object has been modified" errors. Therefore we try the status updates in a retry loop.
 	err := retry.Do(func() error {
-		for rnn, _ := range rm.Routes {
+		for rnn := range rm.Routes {
 			route := gwv1.HTTPRoute{}
 			err := s.mgr.GetClient().Get(ctx, rnn, &route)
 			if err != nil {
@@ -798,7 +795,7 @@ func (s *ProxySyncer) syncGatewayStatus(ctx context.Context, rm reports.ReportMa
 
 	// TODO: retry within loop per GW rathen that as a full block
 	err := retry.Do(func() error {
-		for gwnn, _ := range rm.Gateways {
+		for gwnn := range rm.Gateways {
 			gw := gwv1.Gateway{}
 			err := s.mgr.GetClient().Get(ctx, gwnn, &gw)
 			if err != nil {

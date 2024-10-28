@@ -65,61 +65,32 @@ func NewGroupKindNs(gk metav1.GroupKind, ns string) *GroupKindNs {
 	}
 }
 
-type From interface {
-	GroupKind() (metav1.GroupKind, error)
-	Namespace() string
+type From struct {
+	GroupKind metav1.GroupKind
+	Namespace string
 }
 
-type FromObject struct {
-	client.Object
-	Scheme *runtime.Scheme
-}
-
-func (f FromObject) GroupKind() (metav1.GroupKind, error) {
-	scheme := f.Scheme
-	from := f.Object
-	gvks, isUnversioned, err := scheme.ObjectKinds(from)
-	var zero metav1.GroupKind
-	if err != nil {
-		return zero, fmt.Errorf("failed to get object kind %T", from)
+func FromRoute(hr *apiv1.HTTPRoute) From {
+	return From{
+		GroupKind: metav1.GroupKind(wellknown.HTTPRouteGVK.GroupKind()),
+		Namespace: hr.Namespace,
 	}
-	if isUnversioned {
-		return zero, fmt.Errorf("object of type %T is not versioned", from)
+}
+
+func FromGateway(gw *apiv1.Gateway) From {
+	return From{
+		GroupKind: metav1.GroupKind(wellknown.GatewayGVK.GroupKind()),
+		Namespace: gw.Namespace,
 	}
-	if len(gvks) != 1 {
-		return zero, fmt.Errorf("ambigous gvks for %T, %v", f, gvks)
-	}
-	gvk := gvks[0]
-	return metav1.GroupKind{Group: gvk.Group, Kind: gvk.Kind}, nil
-}
-
-func (f FromObject) Namespace() string {
-	return f.GetNamespace()
-}
-
-// TODO(Law): remove this type entirely?
-type FromGkNs struct {
-	Gk metav1.GroupKind
-	Ns string
-}
-
-func (f FromGkNs) GroupKind() (metav1.GroupKind, error) {
-	return f.Gk, nil
-}
-
-func (f FromGkNs) Namespace() string {
-	return f.Ns
 }
 
 type GatewayQueries interface {
-	ObjToFrom(obj client.Object) From
-
 	// Given a backendRef that resides in namespace obj, return the service that backs it.
 	// This will error with `ErrMissingReferenceGrant` if there is no reference grant allowing the reference
 	// return value depends on the group/kind in the backendRef.
 	GetBackendForRef(ctx context.Context, obj From, backendRef *apiv1.BackendObjectReference) (client.Object, error)
 
-	GetSecretForRef(ctx context.Context, obj From, secretRef apiv1.SecretObjectReference) (client.Object, error)
+	GetSecretForRef(ctx context.Context, obj From, secretRef apiv1.SecretObjectReference) (*corev1.Secret, error)
 
 	GetLocalObjRef(ctx context.Context, from From, localObjRef apiv1.LocalObjectReference) (client.Object, error)
 
@@ -163,10 +134,6 @@ func (r *gatewayQueries) referenceAllowed(ctx context.Context, from metav1.Group
 	}
 
 	return ReferenceAllowed(ctx, from, fromns, to, toname, list.Items), nil
-}
-
-func (r *gatewayQueries) ObjToFrom(obj client.Object) From {
-	return FromObject{Object: obj, Scheme: r.scheme}
 }
 
 func parentRefMatchListener(ref apiv1.ParentReference, l *apiv1.Listener) bool {
@@ -245,19 +212,29 @@ func hostnameIntersect(l *apiv1.Listener, hr *apiv1.HTTPRoute) (bool, []string) 
 	return false, nil
 }
 
-func (r *gatewayQueries) GetSecretForRef(ctx context.Context, obj From, secretRef apiv1.SecretObjectReference) (client.Object, error) {
-	secretKind := "Secret"
-	secretGroup := ""
-
+func (r *gatewayQueries) GetSecretForRef(ctx context.Context, obj From, secretRef apiv1.SecretObjectReference) (*corev1.Secret, error) {
+	secretGK := metav1.GroupKind{Group: corev1.GroupName, Kind: wellknown.SecretKind}
+	refGk := secretGK
 	if secretRef.Group != nil {
-		secretGroup = string(*secretRef.Group)
+		refGk.Group = string(*secretRef.Group)
 	}
 	if secretRef.Kind != nil {
-		secretKind = string(*secretRef.Kind)
+		refGk.Kind = string(*secretRef.Kind)
 	}
-	secretGK := metav1.GroupKind{Group: secretGroup, Kind: secretKind}
+	if refGk != secretGK {
+		return nil, fmt.Errorf("only support core Secret references")
+	}
 
-	return r.getRef(ctx, obj, string(secretRef.Name), secretRef.Namespace, secretGK)
+	secretObj, err := r.getRef(ctx, obj, string(secretRef.Name), secretRef.Namespace, secretGK)
+	if err != nil {
+		return nil, err
+	}
+	secret, ok := secretObj.(*corev1.Secret)
+	if !ok {
+		return nil, fmt.Errorf("did not get corev1.Secret for %v", secretGK)
+	}
+
+	return secret, nil
 }
 
 func (r *gatewayQueries) GetLocalObjRef(ctx context.Context, obj From, localObjRef apiv1.LocalObjectReference) (client.Object, error) {
@@ -291,7 +268,7 @@ func (r *gatewayQueries) GetBackendForRef(ctx context.Context, obj From, backend
 }
 
 func (r *gatewayQueries) getRef(ctx context.Context, from From, backendName string, backendNS *apiv1.Namespace, backendGK metav1.GroupKind) (client.Object, error) {
-	fromNs := from.Namespace()
+	fromNs := from.Namespace
 	if fromNs == "" {
 		fromNs = "default"
 	}
@@ -300,10 +277,7 @@ func (r *gatewayQueries) getRef(ctx context.Context, from From, backendName stri
 		ns = string(*backendNS)
 	}
 	if ns != fromNs {
-		fromgk, err := from.GroupKind()
-		if err != nil {
-			return nil, err
-		}
+		fromgk := from.GroupKind
 		// check if we're allowed to reference this namespace
 		allowed, err := r.referenceAllowed(ctx, fromgk, fromNs, backendGK, ns, backendName)
 		if err != nil {

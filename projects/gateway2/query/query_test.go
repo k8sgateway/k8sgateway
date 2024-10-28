@@ -25,10 +25,6 @@ var _ = Describe("Query", func() {
 		builder *fake.ClientBuilder
 	)
 
-	tofrom := func(o client.Object) query.From {
-		return query.FromObject{Scheme: scheme, Object: o}
-	}
-
 	BeforeEach(func() {
 		scheme = schemes.DefaultScheme()
 		builder = fake.NewClientBuilder().WithScheme(scheme)
@@ -47,7 +43,7 @@ var _ = Describe("Query", func() {
 				Name: "foo",
 			}
 
-			backend, err := gq.GetBackendForRef(context.Background(), tofrom(httpRoute()), ref)
+			backend, err := gq.GetBackendForRef(context.Background(), query.FromRoute(httpRoute()), ref)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(backend).NotTo(BeNil())
 			Expect(backend.GetName()).To(Equal("foo"))
@@ -63,7 +59,7 @@ var _ = Describe("Query", func() {
 				Namespace: nsptr("default2"),
 			}
 
-			backend, err := gq.GetBackendForRef(context.Background(), tofrom(httpRoute()), ref)
+			backend, err := gq.GetBackendForRef(context.Background(), query.FromRoute(httpRoute()), ref)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(backend).NotTo(BeNil())
 			Expect(backend.GetName()).To(Equal("foo"))
@@ -78,7 +74,7 @@ var _ = Describe("Query", func() {
 				Name:      "foo",
 				Namespace: nsptr("default2"),
 			}
-			backend, err := gq.GetBackendForRef(context.Background(), tofrom(httpRoute()), ref)
+			backend, err := gq.GetBackendForRef(context.Background(), query.FromRoute(httpRoute()), ref)
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 			Expect(backend).To(BeNil())
 		})
@@ -117,7 +113,7 @@ var _ = Describe("Query", func() {
 			fakeClient := builder.WithObjects(rg, svc("default2")).Build()
 
 			gq := query.NewData(fakeClient, scheme)
-			backend, err := gq.GetBackendForRef(context.Background(), tofrom(httpRoute()), ref)
+			backend, err := gq.GetBackendForRef(context.Background(), query.FromRoute(httpRoute()), ref)
 			Expect(err).To(MatchError(query.ErrMissingReferenceGrant))
 			Expect(backend).To(BeNil())
 		})
@@ -130,7 +126,7 @@ var _ = Describe("Query", func() {
 				Namespace: nsptr("default3"),
 			}
 
-			backend, err := gq.GetBackendForRef(context.Background(), tofrom(httpRoute()), ref)
+			backend, err := gq.GetBackendForRef(context.Background(), query.FromRoute(httpRoute()), ref)
 			Expect(err).To(MatchError(query.ErrMissingReferenceGrant))
 			Expect(backend).To(BeNil())
 		})
@@ -144,7 +140,7 @@ var _ = Describe("Query", func() {
 				Name:      "foo",
 				Namespace: nsptr("default3"),
 			}
-			backend, err := gq.GetBackendForRef(context.Background(), tofrom(httpRoute()), ref)
+			backend, err := gq.GetBackendForRef(context.Background(), query.FromRoute(httpRoute()), ref)
 			Expect(err).To(MatchError(query.ErrMissingReferenceGrant))
 			Expect(backend).To(BeNil())
 		})
@@ -159,7 +155,7 @@ var _ = Describe("Query", func() {
 				Name:      "foo",
 				Namespace: nsptr("default2"),
 			}
-			backend, err := gq.GetSecretForRef(context.Background(), tofrom(gw()), ref)
+			backend, err := gq.GetSecretForRef(context.Background(), query.FromGateway(gw()), ref)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(backend).NotTo(BeNil())
 			Expect(backend.GetName()).To(Equal("foo"))

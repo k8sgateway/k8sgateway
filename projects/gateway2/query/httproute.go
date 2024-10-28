@@ -43,6 +43,11 @@ type HTTPRouteInfo struct {
 	Children BackendMap[[]*HTTPRouteInfo]
 }
 
+func (hr HTTPRouteInfo) Equals(other HTTPRouteInfo) bool {
+	// TODO!!!
+	return true
+}
+
 func (hr HTTPRouteInfo) GetName() string {
 	return hr.HTTPRoute.GetName()
 }
@@ -244,7 +249,7 @@ func (r *gatewayQueries) resolveRouteBackends(ctx context.Context, hr *gwv1.HTTP
 	out := NewBackendMap[client.Object]()
 	for _, rule := range hr.Spec.Rules {
 		for _, backendRef := range rule.BackendRefs {
-			obj, err := r.GetBackendForRef(ctx, r.ObjToFrom(hr), &backendRef.BackendObjectReference)
+			obj, err := r.GetBackendForRef(ctx, FromRoute(hr), &backendRef.BackendObjectReference)
 			if err != nil {
 				out.AddError(backendRef.BackendObjectReference, err)
 				continue

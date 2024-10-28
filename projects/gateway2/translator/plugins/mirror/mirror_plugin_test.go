@@ -49,7 +49,6 @@ func TestSingleMirror(t *testing.T) {
 		},
 	}
 
-	queries.EXPECT().ObjToFrom(rt).Return(nil)
 	queries.EXPECT().GetBackendForRef(context.Background(), gomock.Any(), &filter.RequestMirror.BackendRef).Return(svc, nil)
 	plugin := mirror.NewPlugin(queries)
 	outputRoute := &v1.Route{
@@ -100,7 +99,6 @@ func TestUpstreamMirror(t *testing.T) {
 		},
 	}
 
-	queries.EXPECT().ObjToFrom(rt).Return(nil)
 	queries.EXPECT().GetBackendForRef(context.Background(), gomock.Any(), &filter.RequestMirror.BackendRef).Return(svc, nil)
 	plugin := mirror.NewPlugin(queries)
 	outputRoute := &v1.Route{
@@ -158,9 +156,7 @@ func TestUpstreamMirror(t *testing.T) {
 // 			Namespace: "foo",
 // 		},
 // 	}
-// 	queries.EXPECT().ObjToFrom(rt).Return(nil)
 // 	queries.EXPECT().GetBackendForRef(ctx.Ctx, gomock.Any(), &filter1.RequestMirror.BackendRef).Return(svc1, nil)
-// 	queries.EXPECT().ObjToFrom(rt).Return(nil)
 // 	queries.EXPECT().GetBackendForRef(ctx.Ctx, gomock.Any(), &filter2.RequestMirror.BackendRef).Return(svc2, nil)
 
 // 	plugin := mirror.NewPlugin()
