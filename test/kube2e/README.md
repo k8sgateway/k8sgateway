@@ -1,4 +1,8 @@
 # Kubernetes End-to-End tests
+
+> These are our legacy Kubernetes E2E tests. We are migrating them to `../kubernetes/e2e`. Create new E2E tests there
+> using the new framework.
+
 See the [developer kube-e2e testing guide](/devel/testing/kube-e2e-tests.md) for more information about the philosophy of these tests.
 
 *Note: All commands should be run from the root directory of the Gloo repository*
@@ -65,7 +69,7 @@ To run the regression tests, your kubeconfig file must point to a running Kubern
 
 Use the same command that CI relies on:
 ```bash
-KUBE2E_TESTS=<test-to-run> make run-kube-e2e-tests
+CLUSTER_NAME=solo-test-cluster KUBE2E_TESTS=<test-to-run> make run-kube-e2e-tests
 ```
 
 #### Test Environment Variables
@@ -78,6 +82,7 @@ The below table contains the environment variables that can be used to configure
 | WAIT_ON_FAIL     | 0       | Set to 1 to prevent Ginkgo from cleaning up the Gloo Edge installation in case of failure. Useful to exec into inspect resources created by the test. A command to resume the test run (and thus clean up resources) will be logged to the output. |
 | TEAR_DOWN        | false   | Set to true to uninstall Gloo after the test suite completes                                                                                                                                                                                       |
 | RELEASED_VERSION | ''      | Used by nightlies to tests a specific released version. 'LATEST' will find the latest release                                                                                                                                                      |
+| CLUSTER_NAME     | kind    | Used to control which Kind cluster to run the tests inside | 
 
 #### Common Test Errors
 `getting Helm chart version: expected a single entry with name [gloo], found: 5`\

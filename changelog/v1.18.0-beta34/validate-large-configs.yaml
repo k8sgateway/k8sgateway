@@ -1,0 +1,9 @@
+changelog:
+  - type: FIX
+    issueLink: https://github.com/solo-io/solo-projects/issues/7089
+    resolvesIssue: false
+    description: >-
+      Fix the validation of large configurations when using envoy validation.
+      Previously if the configuration grew too large translation would be blocked unless Transformation Validation was disabled.
+      This change passes the configuration as a file instead, using STDIN (/dev/fd/0)
+      avoiding the need to store the file on disk.

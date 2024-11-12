@@ -7,6 +7,8 @@ import (
 	"github.com/onsi/gomega"
 	testmatchers "github.com/solo-io/gloo/test/gomega/matchers"
 	"github.com/solo-io/skv2/codegen/util"
+
+	_ "embed"
 )
 
 const (
@@ -44,6 +46,9 @@ var (
 	VSTransformationExtractors    = filepath.Join(util.MustGetThisDir(), "testdata", "transformation", "vs-transform-extractors.yaml")
 	VSTransformationHeaderText    = filepath.Join(util.MustGetThisDir(), "testdata", "transformation", "vs-transform-header-text.yaml")
 	VSTransformationSingleReplace = filepath.Join(util.MustGetThisDir(), "testdata", "transformation", "vs-transform-single-replace.yaml")
+
+	// Valid resources
+	LargeConfiguration = filepath.Join(util.MustGetThisDir(), "testdata", "valid-resources", "large-configuration.yaml")
 
 	ExpectedUpstreamResp = &testmatchers.HttpResponse{
 		StatusCode: http.StatusOK,
