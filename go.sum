@@ -2202,6 +2202,8 @@ github.com/influxdata/tdigest v0.0.0-20180711151920-a7d76c6f093a/go.mod h1:9Gkys
 github.com/invopop/yaml v0.1.0/go.mod h1:2XuRLgs/ouIrW3XNzuNj7J3Nvu/Dig5MXvbCEdiBN3Q=
 github.com/invopop/yaml v0.3.1 h1:f0+ZpmhfBSS4MhG+4HYseMdJhoeeopbSKbq5Rpeelso=
 github.com/invopop/yaml v0.3.1/go.mod h1:PMOp3nn4/12yEZUFfmOuNHJsZToEEOwoWsT+D81KkeA=
+github.com/itchyny/json2yaml v0.1.4 h1:/pErVOXGG5iTyXHi/QKR4y3uzhLjGTEmmJIy97YT+k8=
+github.com/itchyny/json2yaml v0.1.4/go.mod h1:6iudhBZdarpjLFRNj+clWLAkGft+9uCcjAZYXUH9eGI=
 github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 h1:BQSFePA1RWJOlocH6Fxy8MmwDt+yVQYULKfN0RoTN8A=
 github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99/go.mod h1:1lJo3i6rXxKeerYnT8Nvf0QmHCRC1n8sfWVwXF2Frvo=
 github.com/jcmturner/aescts/v2 v2.0.0/go.mod h1:AiaICIRyfYg35RUkr8yESTqvSy7csK90qZ5xfvvsoNs=
