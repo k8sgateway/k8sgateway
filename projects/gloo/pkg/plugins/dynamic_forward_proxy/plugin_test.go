@@ -18,6 +18,7 @@ import (
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins"
 	. "github.com/solo-io/gloo/projects/gloo/pkg/plugins/dynamic_forward_proxy"
 	"github.com/solo-io/gloo/projects/gloo/pkg/utils"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	"github.com/solo-io/solo-kit/test/matchers"
 )
 
@@ -159,7 +160,7 @@ var _ = Describe("dynamic forward proxy plugin", func() {
 
 		It("Translates SslConfig", func() {
 			// create dummy snapshot
-			params.Snapshot = &gloosnapshot.ApiSnapshot{}
+			params.Snapshot = snapshotadapter.FromApiSnapshot(&gloosnapshot.ApiSnapshot{})
 
 			// create plugin
 			p := NewPlugin()

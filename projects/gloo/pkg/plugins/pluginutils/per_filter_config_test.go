@@ -13,6 +13,7 @@ import (
 	v1snap "github.com/solo-io/gloo/projects/gloo/pkg/api/v1/gloosnapshot"
 	. "github.com/solo-io/gloo/projects/gloo/pkg/plugins/pluginutils"
 	"github.com/solo-io/gloo/projects/gloo/pkg/utils"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	"github.com/solo-io/solo-kit/pkg/api/v1/resources/core"
 )
 
@@ -94,7 +95,7 @@ var _ = Describe("TypedPerFilterConfig", func() {
 
 		It("should add typed per filter config to upstream", func() {
 
-			err := MarkPerFilterConfig(context.TODO(), &v1snap.ApiSnapshot{}, in, out, name, func(spec *v1.Destination) (proto.Message, error) {
+			err := MarkPerFilterConfig(context.TODO(), snapshotadapter.FromApiSnapshot(&v1snap.ApiSnapshot{}), in, out, name, func(spec *v1.Destination) (proto.Message, error) {
 				return msg, nil
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -103,7 +104,7 @@ var _ = Describe("TypedPerFilterConfig", func() {
 
 		It("should add typed per filter config only to relevant upstream", func() {
 
-			err := MarkPerFilterConfig(context.TODO(), &v1snap.ApiSnapshot{}, in, out, name, func(spec *v1.Destination) (proto.Message, error) {
+			err := MarkPerFilterConfig(context.TODO(), snapshotadapter.FromApiSnapshot(&v1snap.ApiSnapshot{}), in, out, name, func(spec *v1.Destination) (proto.Message, error) {
 				return nil, nil
 			})
 			Expect(err).NotTo(HaveOccurred())
@@ -168,7 +169,7 @@ var _ = Describe("TypedPerFilterConfig", func() {
 
 		It("should add typed per filter config only to relevant upstream in mutiple dest", func() {
 
-			err := MarkPerFilterConfig(context.TODO(), &v1snap.ApiSnapshot{}, in, out, name, func(spec *v1.Destination) (proto.Message, error) {
+			err := MarkPerFilterConfig(context.TODO(), snapshotadapter.FromApiSnapshot(&v1snap.ApiSnapshot{}), in, out, name, func(spec *v1.Destination) (proto.Message, error) {
 				if spec.GetUpstream().Name == "yes" {
 					return msg, nil
 				}
@@ -231,7 +232,7 @@ var _ = Describe("TypedPerFilterConfig", func() {
 
 			It("should add typed per filter config only to relevant upstream in mutiple dest", func() {
 
-				err := MarkPerFilterConfig(context.TODO(), snap, in, out, name, func(spec *v1.Destination) (proto.Message, error) {
+				err := MarkPerFilterConfig(context.TODO(), snapshotadapter.FromApiSnapshot(snap), in, out, name, func(spec *v1.Destination) (proto.Message, error) {
 					if spec.GetUpstream().Name == "yes" {
 						return msg, nil
 					}
@@ -264,7 +265,7 @@ var _ = Describe("TypedPerFilterConfig", func() {
 			}
 		})
 		It("should not throw NPE when destination is nil", func() {
-			err := MarkPerFilterConfig(context.TODO(), &v1snap.ApiSnapshot{}, in, out, name, func(spec *v1.Destination) (proto.Message, error) {
+			err := MarkPerFilterConfig(context.TODO(), snapshotadapter.FromApiSnapshot(&v1snap.ApiSnapshot{}), in, out, name, func(spec *v1.Destination) (proto.Message, error) {
 				return nil, nil
 			})
 			Expect(err).To(HaveOccurred())

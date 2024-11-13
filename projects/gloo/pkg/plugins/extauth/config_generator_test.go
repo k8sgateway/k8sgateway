@@ -19,6 +19,7 @@ import (
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins"
 	. "github.com/solo-io/gloo/projects/gloo/pkg/plugins/extauth"
 	"github.com/solo-io/gloo/projects/gloo/pkg/translator"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	. "github.com/solo-io/go-utils/testutils"
 	"github.com/solo-io/solo-kit/pkg/api/v1/resources/core"
 	"github.com/solo-io/solo-kit/pkg/utils/prototime"
@@ -114,7 +115,7 @@ var _ = Describe("ExtAuthzConfigGenerator", func() {
 						Name:      "test",
 						Namespace: "test",
 					}
-					params.Snapshot = &v1snap.ApiSnapshot{
+					snpashot := &v1snap.ApiSnapshot{
 						Upstreams: []*gloov1.Upstream{
 							{
 								Metadata: &core.Metadata{
@@ -124,7 +125,8 @@ var _ = Describe("ExtAuthzConfigGenerator", func() {
 							},
 						},
 					}
-					params.Snapshot.Upstreams = []*gloov1.Upstream{
+					params.Snapshot = snapshotadapter.FromApiSnapshot(snpashot)
+					snpashot.Upstreams = []*gloov1.Upstream{
 						{
 							Metadata: &core.Metadata{
 								Name:      "test",
@@ -206,7 +208,7 @@ var _ = Describe("ExtAuthzConfigGenerator", func() {
 					})
 
 					It("uses the expected defaults", func() {
-						filters, err := extAuthzConfigGenerator.GenerateListenerExtAuthzConfig(nil, gloov1.UpstreamList{upstream})
+						filters, err := extAuthzConfigGenerator.GenerateListenerExtAuthzConfig(nil, snapshotadapter.ToSlice(gloov1.UpstreamList{upstream}))
 						Expect(err).NotTo(HaveOccurred())
 						Expect(filters).To(HaveLen(1))
 
@@ -224,7 +226,7 @@ var _ = Describe("ExtAuthzConfigGenerator", func() {
 					})
 
 					It("sets TransportApiVersion to V3 on the ext auth filter", func() {
-						filters, err := extAuthzConfigGenerator.GenerateListenerExtAuthzConfig(nil, gloov1.UpstreamList{upstream})
+						filters, err := extAuthzConfigGenerator.GenerateListenerExtAuthzConfig(nil, snapshotadapter.ToSlice(gloov1.UpstreamList{upstream}))
 						Expect(err).NotTo(HaveOccurred())
 						Expect(filters).To(HaveLen(1))
 
@@ -278,7 +280,7 @@ var _ = Describe("ExtAuthzConfigGenerator", func() {
 					})
 
 					It("generates the expected configuration", func() {
-						filters, err := extAuthzConfigGenerator.GenerateListenerExtAuthzConfig(nil, gloov1.UpstreamList{upstream})
+						filters, err := extAuthzConfigGenerator.GenerateListenerExtAuthzConfig(nil, snapshotadapter.ToSlice(gloov1.UpstreamList{upstream}))
 						Expect(err).NotTo(HaveOccurred())
 						Expect(filters).To(HaveLen(1))
 
@@ -300,7 +302,7 @@ var _ = Describe("ExtAuthzConfigGenerator", func() {
 					})
 
 					It("returns an error", func() {
-						_, err := extAuthzConfigGenerator.GenerateListenerExtAuthzConfig(nil, gloov1.UpstreamList{upstream})
+						_, err := extAuthzConfigGenerator.GenerateListenerExtAuthzConfig(nil, snapshotadapter.ToSlice(gloov1.UpstreamList{upstream}))
 						Expect(err).To(HaveOccurred())
 						Expect(err).To(HaveInErrorChain(InvalidStatusOnErrorErr(999)))
 					})
@@ -383,7 +385,7 @@ var _ = Describe("ExtAuthzConfigGenerator", func() {
 					})
 
 					It("uses the expected defaults", func() {
-						filters, err := extAuthzConfigGenerator.GenerateListenerExtAuthzConfig(nil, gloov1.UpstreamList{upstream})
+						filters, err := extAuthzConfigGenerator.GenerateListenerExtAuthzConfig(nil, snapshotadapter.ToSlice(gloov1.UpstreamList{upstream}))
 						Expect(err).NotTo(HaveOccurred())
 						Expect(filters).To(HaveLen(1))
 
@@ -423,7 +425,7 @@ var _ = Describe("ExtAuthzConfigGenerator", func() {
 					})
 
 					It("uses the expected defaults", func() {
-						filters, err := extAuthzConfigGenerator.GenerateListenerExtAuthzConfig(nil, gloov1.UpstreamList{upstream})
+						filters, err := extAuthzConfigGenerator.GenerateListenerExtAuthzConfig(nil, snapshotadapter.ToSlice(gloov1.UpstreamList{upstream}))
 						Expect(err).NotTo(HaveOccurred())
 						Expect(filters).To(HaveLen(1))
 

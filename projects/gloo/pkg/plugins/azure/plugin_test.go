@@ -13,6 +13,7 @@ import (
 	"github.com/solo-io/gloo/projects/gloo/pkg/api/v1/ssl"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins"
 	azureplugin "github.com/solo-io/gloo/projects/gloo/pkg/plugins/azure"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	"github.com/solo-io/solo-kit/pkg/api/v1/resources/core"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -74,7 +75,7 @@ var _ = Describe("Plugin", func() {
 					Namespace: namespace,
 					Name:      "azure-secret1",
 				}
-				params.Snapshot = &v1snap.ApiSnapshot{
+				params.Snapshot = snapshotadapter.FromApiSnapshot(&v1snap.ApiSnapshot{
 					Secrets: v1.SecretList{{
 						Metadata: &core.Metadata{
 							Name:      "azure-secret1",
@@ -90,7 +91,7 @@ var _ = Describe("Plugin", func() {
 							},
 						},
 					}},
-				}
+				})
 			})
 
 			It("should not error", func() {

@@ -16,6 +16,7 @@ import (
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins/grpcjson"
 	"github.com/solo-io/gloo/projects/gloo/pkg/utils"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	"github.com/solo-io/gloo/test/gomega/matchers"
 	"github.com/solo-io/solo-kit/pkg/api/v1/resources/core"
 )
@@ -241,7 +242,7 @@ var _ = Describe("GrpcJson", func() {
 			p := grpcjson.NewPlugin()
 			p.Init(initParams)
 			_, err := p.HttpFilters(plugins.Params{
-				Snapshot: snap,
+				Snapshot: snapshotadapter.FromApiSnapshot(snap),
 			}, hl)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(Equal(grpcjson.NoConfigMapRefError().Error()))
@@ -254,7 +255,7 @@ var _ = Describe("GrpcJson", func() {
 			p := grpcjson.NewPlugin()
 			p.Init(initParams)
 			_, err := p.HttpFilters(plugins.Params{
-				Snapshot: snap,
+				Snapshot: snapshotadapter.FromApiSnapshot(snap),
 			}, hl)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(Equal(grpcjson.ConfigMapNotFoundError(hl.GetOptions().GetGrpcJsonTranscoder().GetProtoDescriptorConfigMap()).Error()))
@@ -266,7 +267,7 @@ var _ = Describe("GrpcJson", func() {
 			p := grpcjson.NewPlugin()
 			p.Init(initParams)
 			_, err := p.HttpFilters(plugins.Params{
-				Snapshot: snap,
+				Snapshot: snapshotadapter.FromApiSnapshot(snap),
 			}, hl)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(Equal(grpcjson.ConfigMapNoValuesError(hl.GetOptions().GetGrpcJsonTranscoder().GetProtoDescriptorConfigMap()).Error()))
@@ -279,7 +280,7 @@ var _ = Describe("GrpcJson", func() {
 			p := grpcjson.NewPlugin()
 			p.Init(initParams)
 			f, err := p.HttpFilters(plugins.Params{
-				Snapshot: snap,
+				Snapshot: snapshotadapter.FromApiSnapshot(snap),
 			}, hl)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(f).NotTo(BeNil())
@@ -292,7 +293,7 @@ var _ = Describe("GrpcJson", func() {
 			p := grpcjson.NewPlugin()
 			p.Init(initParams)
 			f, err := p.HttpFilters(plugins.Params{
-				Snapshot: snap,
+				Snapshot: snapshotadapter.FromApiSnapshot(snap),
 			}, hl)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(f).NotTo(BeNil())
@@ -306,7 +307,7 @@ var _ = Describe("GrpcJson", func() {
 			p := grpcjson.NewPlugin()
 			p.Init(initParams)
 			_, err := p.HttpFilters(plugins.Params{
-				Snapshot: snap,
+				Snapshot: snapshotadapter.FromApiSnapshot(snap),
 			}, hl)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(Equal(grpcjson.NoDataError(hl.GetOptions().GetGrpcJsonTranscoder().GetProtoDescriptorConfigMap(), "nonexistent-key").Error()))
@@ -318,7 +319,7 @@ var _ = Describe("GrpcJson", func() {
 			p := grpcjson.NewPlugin()
 			p.Init(initParams)
 			_, err := p.HttpFilters(plugins.Params{
-				Snapshot: snap,
+				Snapshot: snapshotadapter.FromApiSnapshot(snap),
 			}, hl)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(Equal(grpcjson.NoConfigMapKeyError(hl.GetOptions().GetGrpcJsonTranscoder().GetProtoDescriptorConfigMap(), 2).Error()))
@@ -330,7 +331,7 @@ var _ = Describe("GrpcJson", func() {
 			p := grpcjson.NewPlugin()
 			p.Init(initParams)
 			_, err := p.HttpFilters(plugins.Params{
-				Snapshot: snap,
+				Snapshot: snapshotadapter.FromApiSnapshot(snap),
 			}, hl)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(Equal(grpcjson.DecodingError(hl.GetOptions().GetGrpcJsonTranscoder().GetProtoDescriptorConfigMap(), "protoDesc").Error()))

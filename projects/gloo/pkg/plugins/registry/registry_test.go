@@ -28,6 +28,7 @@ import (
 	"github.com/solo-io/gloo/projects/gloo/pkg/api/v1/options/grpc_web"
 	"github.com/solo-io/gloo/projects/gloo/pkg/api/v1/options/hcm"
 	"github.com/solo-io/gloo/projects/gloo/pkg/api/v1/options/healthcheck"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/solo-io/gloo/projects/gloo/pkg/bootstrap"
@@ -154,9 +155,9 @@ func TestPluginsHttpFilterUsefulness(t *testing.T) {
 
 		params := plugins.Params{
 			Ctx: ctx,
-			Snapshot: &gloov1snap.ApiSnapshot{
+			Snapshot: snapshotadapter.FromApiSnapshot(&gloov1snap.ApiSnapshot{
 				Proxies: gloov1.ProxyList{proxy},
-			},
+			}),
 		}
 		// Filters should not be added to this map without due consideration
 		// In general we should strive not to add any new default filters going forwards

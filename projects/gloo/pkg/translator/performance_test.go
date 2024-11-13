@@ -21,6 +21,7 @@ import (
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins/registry"
 	mock_consul "github.com/solo-io/gloo/projects/gloo/pkg/upstreams/consul/mocks"
 	glooutils "github.com/solo-io/gloo/projects/gloo/pkg/utils"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	gloohelpers "github.com/solo-io/gloo/test/helpers"
 	"github.com/solo-io/solo-kit/pkg/api/v1/clients/factory"
 	"github.com/solo-io/solo-kit/pkg/api/v1/clients/memory"
@@ -96,7 +97,7 @@ var _ = Describe("Translation - Benchmarking Tests", decorators.Performance, Lab
 
 			params := plugins.Params{
 				Ctx:      context.Background(),
-				Snapshot: apiSnap,
+				Snapshot: snapshotadapter.FromApiSnapshot(apiSnap),
 			}
 
 			Expect(apiSnap.Proxies).NotTo(BeEmpty())

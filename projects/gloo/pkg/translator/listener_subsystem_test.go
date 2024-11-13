@@ -7,8 +7,8 @@ import (
 	envoy_config_listener_v3 "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	envoy_config_route_v3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	envoy_http_connection_manager_v3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
-	"github.com/golang/mock/gomock"
 	"github.com/golang/protobuf/ptypes/wrappers"
+	"go.uber.org/mock/gomock"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -32,6 +32,7 @@ import (
 	"github.com/solo-io/gloo/projects/gloo/pkg/translator"
 	sslutils "github.com/solo-io/gloo/projects/gloo/pkg/utils"
 	mock_utils "github.com/solo-io/gloo/projects/gloo/pkg/utils/mocks"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	gloovalidation "github.com/solo-io/gloo/projects/gloo/pkg/utils/validation"
 	gloohelpers "github.com/solo-io/gloo/test/helpers"
 	"github.com/solo-io/solo-kit/pkg/api/v1/resources/core"
@@ -135,7 +136,7 @@ var _ = Describe("Listener Subsystem", func() {
 
 			params := plugins.Params{
 				Ctx: ctx,
-				Snapshot: &gloov1snap.ApiSnapshot{
+				Snapshot: snapshotadapter.FromApiSnapshot(&gloov1snap.ApiSnapshot{
 					// To support ssl filter chain
 					Secrets: v1.SecretList{createTLSSecret()},
 					Upstreams: v1.UpstreamList{{
@@ -144,7 +145,7 @@ var _ = Describe("Listener Subsystem", func() {
 							Namespace: "gloo-system",
 						},
 					}},
-				},
+				}),
 			}
 			envoyListener := listenerTranslator.ComputeListener(params)
 			envoyRouteConfigs := routeConfigurationTranslator.ComputeRouteConfiguration(params)
@@ -474,7 +475,7 @@ var _ = Describe("Listener Subsystem", func() {
 
 			params := plugins.Params{
 				Ctx: ctx,
-				Snapshot: &gloov1snap.ApiSnapshot{
+				Snapshot: snapshotadapter.FromApiSnapshot(&gloov1snap.ApiSnapshot{
 					Secrets: []*v1.Secret{{
 						Kind: &v1.Secret_Tls{
 							// This is an invalid secret that will generate a listener error when referenced.
@@ -485,7 +486,7 @@ var _ = Describe("Listener Subsystem", func() {
 							Namespace: defaults.GlooSystem,
 						},
 					}},
-				},
+				}),
 			}
 			_ = listenerTranslator.ComputeListener(params)
 			_ = routeConfigurationTranslator.ComputeRouteConfiguration(params)
@@ -719,10 +720,10 @@ var _ = Describe("Listener Subsystem", func() {
 				listenerReport)
 			params := plugins.Params{
 				Ctx: ctx,
-				Snapshot: &gloov1snap.ApiSnapshot{
+				Snapshot: snapshotadapter.FromApiSnapshot(&gloov1snap.ApiSnapshot{
 					// To support ssl filter chain
 					Secrets: v1.SecretList{createTLSSecret()},
-				},
+				}),
 			}
 			li := listenerTranslator.ComputeListener(params)
 			_ = routeConfigurationTranslator.ComputeRouteConfiguration(params)

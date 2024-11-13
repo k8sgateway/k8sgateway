@@ -16,6 +16,7 @@ import (
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins/tunneling"
 	"github.com/solo-io/gloo/projects/gloo/pkg/translator"
 	"github.com/solo-io/gloo/projects/gloo/pkg/utils"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	"github.com/solo-io/skv2/test/matchers"
 	"github.com/solo-io/solo-kit/pkg/api/v1/resources/core"
 	"google.golang.org/protobuf/proto"
@@ -28,6 +29,7 @@ const (
 var _ = Describe("Plugin", func() {
 
 	var (
+		snapshot              *v1snap.ApiSnapshot
 		params                plugins.Params
 		inRouteConfigurations []*envoy_config_route_v3.RouteConfiguration
 		inClusters            []*envoy_config_cluster_v3.Cluster
@@ -43,11 +45,11 @@ var _ = Describe("Plugin", func() {
 	)
 
 	BeforeEach(func() {
-
+		snapshot = &v1snap.ApiSnapshot{
+			Upstreams: []*v1.Upstream{us},
+		}
 		params = plugins.Params{
-			Snapshot: &v1snap.ApiSnapshot{
-				Upstreams: []*v1.Upstream{us},
-			},
+			Snapshot: snapshotadapter.FromApiSnapshot(snapshot),
 		}
 
 		inRouteConfigurations = []*envoy_config_route_v3.RouteConfiguration{
@@ -184,7 +186,7 @@ var _ = Describe("Plugin", func() {
 			usCopy.Metadata.Name = usCopy.Metadata.Name + "-copy"
 
 			// update snapshot with copied upstream, pointing to same HTTP proxy. copied upstream only has different name
-			params.Snapshot.Upstreams = append(params.Snapshot.Upstreams, usCopy)
+			snapshot.Upstreams = append(snapshot.Upstreams, usCopy)
 
 			// update route input with duplicate route, the copy points to the cluster correlating to the copied upstream
 			inRoute := inRouteConfigurations[0].VirtualHosts[0].Routes[0]

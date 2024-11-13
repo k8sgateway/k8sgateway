@@ -12,6 +12,7 @@ import (
 	"github.com/solo-io/gloo/projects/gloo/pkg/api/v1/ssl"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins"
 	"github.com/solo-io/gloo/projects/gloo/pkg/utils"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 )
 
 var _ = Describe("Plugin", func() {
@@ -200,7 +201,7 @@ var _ = Describe("Plugin", func() {
 			config, err := utils.MessageToAny(configEnvoy)
 
 			p := NewPlugin()
-			err = p.ProcessListener(plugins.Params{Snapshot: snap}, listener, out)
+			err = p.ProcessListener(plugins.Params{Snapshot: snapshotadapter.FromApiSnapshot(snap)}, listener, out)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(out.ListenerFilters).To(HaveLen(1))
 			Expect(out.ListenerFilters[0].GetName()).To(Equal(wellknown.TlsInspector))
@@ -441,7 +442,7 @@ var _ = Describe("Plugin", func() {
 				config, err := utils.MessageToAny(configEnvoy)
 
 				p := NewPlugin()
-				err = p.ProcessListener(plugins.Params{Snapshot: snap}, in, out)
+				err = p.ProcessListener(plugins.Params{Snapshot: snapshotadapter.FromApiSnapshot(snap)}, in, out)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(out.ListenerFilters).To(HaveLen(1))
 				Expect(out.ListenerFilters[0].GetName()).To(Equal(wellknown.TlsInspector))

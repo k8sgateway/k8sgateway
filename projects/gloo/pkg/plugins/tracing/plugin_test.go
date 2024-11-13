@@ -19,6 +19,7 @@ import (
 	"github.com/solo-io/gloo/projects/gloo/pkg/api/v1/options/hcm"
 	"github.com/solo-io/gloo/projects/gloo/pkg/api/v1/options/tracing"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	"github.com/solo-io/solo-kit/pkg/api/v1/resources/core"
 )
 
@@ -34,7 +35,7 @@ var _ = Describe("Plugin", func() {
 	BeforeEach(func() {
 		plugin = NewPlugin()
 		pluginParams = plugins.Params{
-			Snapshot: nil,
+			Snapshot: snapshotadapter.ApiSnapshot{},
 		}
 		hcmSettings = &hcm.HttpConnectionManagerSettings{}
 	})
@@ -198,11 +199,11 @@ var _ = Describe("Plugin", func() {
 		Describe("when zipkin provider config", func() {
 			It("references invalid upstream", func() {
 				pluginParams = plugins.Params{
-					Snapshot: &v1snap.ApiSnapshot{
+					Snapshot: snapshotadapter.FromApiSnapshot(&v1snap.ApiSnapshot{
 						Upstreams: v1.UpstreamList{
 							// No valid upstreams
 						},
-					},
+					}),
 				}
 				cfg := &envoyhttp.HttpConnectionManager{}
 				hcmSettings = &hcm.HttpConnectionManagerSettings{
@@ -226,9 +227,9 @@ var _ = Describe("Plugin", func() {
 			It("references valid upstream", func() {
 				us := v1.NewUpstream("default", "valid")
 				pluginParams = plugins.Params{
-					Snapshot: &v1snap.ApiSnapshot{
+					Snapshot: snapshotadapter.FromApiSnapshot(&v1snap.ApiSnapshot{
 						Upstreams: v1.UpstreamList{us},
-					},
+					}),
 				}
 
 				cfg := &envoyhttp.HttpConnectionManager{}
@@ -317,11 +318,11 @@ var _ = Describe("Plugin", func() {
 		Describe("when datadog provider config", func() {
 			It("references invalid upstream", func() {
 				pluginParams = plugins.Params{
-					Snapshot: &v1snap.ApiSnapshot{
+					Snapshot: snapshotadapter.FromApiSnapshot(&v1snap.ApiSnapshot{
 						Upstreams: v1.UpstreamList{
 							// No valid upstreams
 						},
-					},
+					}),
 				}
 				cfg := &envoyhttp.HttpConnectionManager{}
 				hcmSettings = &hcm.HttpConnectionManagerSettings{
@@ -345,9 +346,9 @@ var _ = Describe("Plugin", func() {
 			It("references valid upstream", func() {
 				us := v1.NewUpstream("default", "valid")
 				pluginParams = plugins.Params{
-					Snapshot: &v1snap.ApiSnapshot{
+					Snapshot: snapshotadapter.FromApiSnapshot(&v1snap.ApiSnapshot{
 						Upstreams: v1.UpstreamList{us},
-					},
+					}),
 				}
 				cfg := &envoyhttp.HttpConnectionManager{}
 				hcmSettings = &hcm.HttpConnectionManagerSettings{

@@ -21,6 +21,7 @@ import (
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins/registry"
 	"github.com/solo-io/gloo/projects/gloo/pkg/translator"
 	sslutils "github.com/solo-io/gloo/projects/gloo/pkg/utils"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	gloovalidation "github.com/solo-io/gloo/projects/gloo/pkg/utils/validation"
 	"github.com/solo-io/solo-kit/pkg/api/v1/resources/core"
 )
@@ -89,10 +90,10 @@ var _ = Describe("Router filter test", func() {
 
 			params := plugins.Params{
 				Ctx: ctx,
-				Snapshot: &gloov1snap.ApiSnapshot{
+				Snapshot: snapshotadapter.FromApiSnapshot(&gloov1snap.ApiSnapshot{
 					// To support ssl filter chain
 					Secrets: v1.SecretList{createTLSSecret()},
-				},
+				}),
 			}
 			envoyListener := listenerTranslator.ComputeListener(params)
 			_ = routeConfigurationTranslator.ComputeRouteConfiguration(params)

@@ -18,7 +18,7 @@ import (
 	"k8s.io/client-go/util/cert"
 )
 
-//go:generate mockgen -destination mocks/mock_ssl.go github.com/solo-io/gloo/projects/gloo/pkg/utils SslConfigTranslator
+//go:generate go run go.uber.org/mock/mockgen -destination mocks/mock_ssl.go github.com/solo-io/gloo/projects/gloo/pkg/utils SslConfigTranslator
 
 const (
 	MetadataPluginName = "envoy.grpc_credentials.file_based_metadata"

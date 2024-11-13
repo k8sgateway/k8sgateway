@@ -22,6 +22,7 @@ import (
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins"
 	. "github.com/solo-io/gloo/projects/gloo/pkg/plugins/extauth"
 	glooutils "github.com/solo-io/gloo/projects/gloo/pkg/utils"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	"github.com/solo-io/solo-kit/pkg/api/v1/resources/core"
 )
 
@@ -260,10 +261,10 @@ func getPluginContext(globalSettings bool, authOnVirtualHost, authOnRoute, authO
 	// ----------------------------------------------------------------------------
 	params := plugins.Params{
 		Ctx: ctx,
-		Snapshot: &v1snap.ApiSnapshot{
+		Snapshot: snapshotadapter.FromApiSnapshot(&v1snap.ApiSnapshot{
 			Proxies:   gloov1.ProxyList{proxy},
 			Upstreams: gloov1.UpstreamList{extAuthServerUpstream},
-		},
+		}),
 	}
 	virtualHostParams := plugins.VirtualHostParams{
 		Params:       params,

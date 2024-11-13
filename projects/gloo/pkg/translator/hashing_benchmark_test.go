@@ -28,6 +28,7 @@ import (
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins/registry"
 	glooutils "github.com/solo-io/gloo/projects/gloo/pkg/utils"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	validationutils "github.com/solo-io/gloo/projects/gloo/pkg/utils/validation"
 	"github.com/solo-io/solo-kit/pkg/api/v1/clients/factory"
 	"github.com/solo-io/solo-kit/pkg/api/v1/clients/memory"
@@ -152,10 +153,10 @@ var _ = Describe("Hashing Benchmarks", decorators.Performance, Label(labels.Perf
 
 			params = plugins.Params{
 				Ctx: context.TODO(),
-				Snapshot: &v1snap.ApiSnapshot{
+				Snapshot: snapshotadapter.FromApiSnapshot(&v1snap.ApiSnapshot{
 					Endpoints: endpoints,
 					Upstreams: allUpstreams,
-				},
+				}),
 			}
 			routes = []*v1.Route{{
 				Name:     "testRouteName",

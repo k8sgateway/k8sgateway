@@ -21,6 +21,7 @@ import (
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins/extauth"
 	. "github.com/solo-io/gloo/projects/gloo/pkg/plugins/ratelimit"
 	"github.com/solo-io/gloo/projects/gloo/pkg/translator"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	"github.com/solo-io/solo-kit/pkg/api/v1/resources/core"
 	"github.com/solo-io/solo-kit/pkg/utils/prototime"
 	"github.com/solo-io/solo-kit/test/matchers"
@@ -70,12 +71,12 @@ var _ = Describe("RateLimit Plugin", func() {
 			},
 		}
 		extAuthServerRef = extAuthServerUpstream.GetMetadata().Ref()
-		params.Snapshot = &gloov1snap.ApiSnapshot{
+		params.Snapshot = snapshotadapter.FromApiSnapshot(&gloov1snap.ApiSnapshot{
 			Upstreams: []*gloov1.Upstream{
 				rlServerUpstream,
 				extAuthServerUpstream,
 			},
-		}
+		})
 	})
 
 	JustBeforeEach(func() {

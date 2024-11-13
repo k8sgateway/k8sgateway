@@ -100,6 +100,7 @@ require (
 	github.com/mccutchen/go-httpbin/v2 v2.15.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/stretchr/testify v1.9.0
+	go.uber.org/mock v0.5.0
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
 	google.golang.org/genproto/googleapis/api v0.0.0-20241021214115-324edc3d5d38
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20241021214115-324edc3d5d38

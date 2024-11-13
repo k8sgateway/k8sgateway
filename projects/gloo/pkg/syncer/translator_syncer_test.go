@@ -367,7 +367,7 @@ func (t *mockTranslator) Translate(params plugins.Params, proxy *v1.Proxy) (envo
 		rpts := reporter.ResourceReports{}
 		rpts.AddError(proxy, errors.Errorf("hi, how ya doin'?"))
 		if t.reportUpstreamErrs {
-			for _, upstream := range params.Snapshot.Upstreams {
+			for _, upstream := range params.Snapshot.Upstreams.List() {
 				if upstream.Metadata.Annotations["uniqueErrPerProxy"] == "true" {
 					rpts.AddError(upstream, errors.Errorf("upstream is bad - determined by %s", proxy.Metadata.Name))
 				} else {
