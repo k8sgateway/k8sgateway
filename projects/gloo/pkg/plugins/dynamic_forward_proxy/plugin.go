@@ -111,7 +111,7 @@ func generateCustomDynamicForwardProxyCluster(listenerCfg *dynamic_forward_proxy
 		},
 	}
 
-	if sslConfig := listenerCfg.GetSslConfig(); sslConfig != nil && params.Snapshot != nil {
+	if sslConfig := listenerCfg.GetSslConfig(); sslConfig != nil && params.Snapshot.Secrets != nil {
 		cfg, err := utils.NewSslConfigTranslator().ResolveUpstreamSslConfig(params.Snapshot.Secrets, sslConfig)
 		if err != nil {
 			return nil, err

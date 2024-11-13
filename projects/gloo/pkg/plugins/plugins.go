@@ -12,6 +12,8 @@ import (
 	envoyhttp "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	v1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1"
 	v1snap "github.com/solo-io/gloo/projects/gloo/pkg/api/v1/gloosnapshot"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
+	"istio.io/istio/pkg/kube/krt"
 )
 
 // Plugin is a named unit of translation, used to produce Envoy configuration
@@ -39,9 +41,14 @@ type InitParams struct {
 
 type Params struct {
 	Ctx      context.Context
+	KrtCtx   krt.HandlerContext
 	Settings *v1.Settings
-	Snapshot *v1snap.ApiSnapshot
+	Snapshot snapshotadapter.ApiSnapshot
 	Messages map[*core.ResourceRef][]string
+}
+
+func (p *Params) SetApiSnapshot(s *v1snap.ApiSnapshot) {
+	p.Snapshot = snapshotadapter.FromApiSnapshot(s)
 }
 
 // CopyWithoutContext returns a version of params without ctx

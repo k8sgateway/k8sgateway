@@ -31,7 +31,7 @@ func (t *translatorInstance) computeClusterEndpoints(
 	defer span.End()
 
 	var clusterEndpointAssignments []*envoy_config_endpoint_v3.ClusterLoadAssignment
-	for _, upstream := range params.Snapshot.Upstreams {
+	for _, upstream := range params.Snapshot.Upstreams.List() {
 		clusterEndpoints := upstreamRefKeyToEndpoints[upstream.GetMetadata().Ref().Key()]
 		// if there are any endpoints for this upstream, it's using eds and we need to create a load assignment for it
 		if len(clusterEndpoints) > 0 {

@@ -9,7 +9,7 @@ import (
 	envoycluster_gloo "github.com/solo-io/gloo/projects/gloo/pkg/api/external/envoy/api/v2/cluster"
 	envoycore_gloo "github.com/solo-io/gloo/projects/gloo/pkg/api/external/envoy/api/v2/core"
 	v3 "github.com/solo-io/gloo/projects/gloo/pkg/api/external/envoy/config/core/v3"
-	v1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 )
 
 // Converts between Envoy and Gloo/solokit versions of envoy protos
@@ -87,7 +87,7 @@ func ToEnvoyOutlierDetection(detection *envoycluster_gloo.OutlierDetection) *env
 	}
 }
 
-func ToEnvoyHealthCheckList(check []*envoycore_gloo.HealthCheck, secrets *v1.SecretList, secretOptions HeaderSecretOptions) ([]*envoy_config_core_v3.HealthCheck, error) {
+func ToEnvoyHealthCheckList(check []*envoycore_gloo.HealthCheck, secrets snapshotadapter.SecretList, secretOptions HeaderSecretOptions) ([]*envoy_config_core_v3.HealthCheck, error) {
 	if check == nil {
 		return nil, nil
 	}
@@ -102,7 +102,7 @@ func ToEnvoyHealthCheckList(check []*envoycore_gloo.HealthCheck, secrets *v1.Sec
 	return result, nil
 }
 
-func ToEnvoyHealthCheck(check *envoycore_gloo.HealthCheck, secrets *v1.SecretList, secretOptions HeaderSecretOptions) (*envoy_config_core_v3.HealthCheck, error) {
+func ToEnvoyHealthCheck(check *envoycore_gloo.HealthCheck, secrets snapshotadapter.SecretList, secretOptions HeaderSecretOptions) (*envoy_config_core_v3.HealthCheck, error) {
 	if check == nil {
 		return nil, nil
 	}

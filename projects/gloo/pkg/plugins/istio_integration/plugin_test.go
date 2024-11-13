@@ -13,6 +13,7 @@ import (
 	kubeplugin "github.com/solo-io/gloo/projects/gloo/pkg/api/v1/options/kubernetes"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins/istio_integration"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	"github.com/solo-io/solo-kit/pkg/api/v1/resources/core"
 )
 
@@ -51,7 +52,7 @@ var _ = Describe("Plugin", func() {
 					},
 				},
 			}
-			host, err := istio_integration.GetHostFromDestination(destination, upstreams)
+			host, err := istio_integration.GetHostFromDestination(destination, snapshotadapter.ToSlice(upstreams))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(host).To(Equal(rewrittenHost))
 		})
@@ -67,7 +68,7 @@ var _ = Describe("Plugin", func() {
 					},
 				},
 			}
-			host, err := istio_integration.GetHostFromDestination(destination, upstreams)
+			host, err := istio_integration.GetHostFromDestination(destination, snapshotadapter.ToSlice(upstreams))
 			Expect(err).NotTo(HaveOccurred())
 			Expect(host).To(Equal(rewrittenHost))
 		})
@@ -96,14 +97,13 @@ var _ = Describe("Plugin", func() {
 					},
 				}
 				istioPlugin.(plugins.Plugin).Init(initParams)
-
+				pluginParams := plugins.Params{}
+				pluginParams.SetApiSnapshot(&gloosnapshot.ApiSnapshot{
+					Upstreams: upstreams,
+				})
 				params := plugins.RouteParams{
 					VirtualHostParams: plugins.VirtualHostParams{
-						Params: plugins.Params{
-							Snapshot: &gloosnapshot.ApiSnapshot{
-								Upstreams: upstreams,
-							},
-						},
+						Params: pluginParams,
 					},
 				}
 				inRoute := &v1.Route{

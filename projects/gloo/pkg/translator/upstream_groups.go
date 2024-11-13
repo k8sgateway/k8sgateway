@@ -12,7 +12,7 @@ func (t *translatorInstance) verifyUpstreamGroups(params plugins.Params, reports
 	upstreams := params.Snapshot.Upstreams
 	upstreamGroups := params.Snapshot.UpstreamGroups
 
-	for _, ug := range upstreamGroups {
+	for _, ug := range upstreamGroups.List() {
 		for i, dest := range ug.GetDestinations() {
 			if dest.GetDestination() == nil {
 				reports.AddError(ug, errors.Errorf("destination # %d: destination is nil", i+1))

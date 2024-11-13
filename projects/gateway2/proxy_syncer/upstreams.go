@@ -14,6 +14,7 @@ import (
 	glookubev1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1/kube/apis/gloo.solo.io/v1"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins"
 	"github.com/solo-io/gloo/projects/gloo/pkg/syncer/setup"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	"github.com/solo-io/go-utils/contextutils"
 	envoycache "github.com/solo-io/solo-kit/pkg/api/v1/control-plane/cache"
 	"github.com/solo-io/solo-kit/pkg/api/v1/control-plane/resource"
@@ -123,7 +124,7 @@ func translate(ctx context.Context, settings *gloov1.Settings, translator setup.
 	params := plugins.Params{
 		Ctx:      ctx,
 		Settings: settings,
-		Snapshot: snap,
+		Snapshot: snapshotadapter.FromApiSnapshot(snap),
 		Messages: map[*core.ResourceRef][]string{},
 	}
 

@@ -12,11 +12,11 @@ import (
 	"github.com/golang/protobuf/ptypes/any"
 	"github.com/rotisserie/eris"
 	v1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1"
-	"github.com/solo-io/gloo/projects/gloo/pkg/api/v1/gloosnapshot"
 	glooplugins "github.com/solo-io/gloo/projects/gloo/pkg/api/v1/options"
 	"github.com/solo-io/gloo/projects/gloo/pkg/api/v1/options/grpc_json"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins/pluginutils"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 )
 
 var (
@@ -211,7 +211,7 @@ func translateGlooToEnvoyPrintOptions(options *grpc_json.GrpcJsonTranscoder_Prin
 }
 
 // get the proto descriptor data from a ConfigMap
-func translateConfigMapToProtoBin(_ context.Context, snap *gloosnapshot.ApiSnapshot, configRef *grpc_json.GrpcJsonTranscoder_DescriptorConfigMap) ([]byte, error) {
+func translateConfigMapToProtoBin(_ context.Context, snap snapshotadapter.ApiSnapshot, configRef *grpc_json.GrpcJsonTranscoder_DescriptorConfigMap) ([]byte, error) {
 	if configRef.GetConfigMapRef() == nil {
 		return nil, NoConfigMapRefError()
 	}

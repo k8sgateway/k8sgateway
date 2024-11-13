@@ -18,9 +18,9 @@ import (
 	"github.com/rotisserie/eris"
 	"github.com/solo-io/gloo/pkg/utils/api_conversion"
 	v1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1"
-	v1snap "github.com/solo-io/gloo/projects/gloo/pkg/api/v1/gloosnapshot"
 	"github.com/solo-io/gloo/projects/gloo/pkg/api/v1/options/headers"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 )
 
 var (
@@ -235,7 +235,7 @@ func getEnforceMatch() (bool, error) {
 
 // getUpstreamNamespaceForRouteAction finds the destination upstreams for a route action and if there's only one namespace
 // between them, returns that namespace, otherwise returns an empty string.
-func getUpstreamNamespaceForRouteAction(snapshot *v1snap.ApiSnapshot, action *v1.RouteAction) string {
+func getUpstreamNamespaceForRouteAction(snapshot snapshotadapter.ApiSnapshot, action *v1.RouteAction) string {
 	usRefs, err := pluginutils.DestinationUpstreams(snapshot, action)
 	if err != nil || len(usRefs) == 0 {
 		return ""
@@ -253,17 +253,17 @@ func getUpstreamNamespaceForRouteAction(snapshot *v1snap.ApiSnapshot, action *v1
 	}
 	return ns
 }
-func getSecretsFromSnapshot(snapshot *v1snap.ApiSnapshot) *v1.SecretList {
-	var secrets *v1.SecretList
-	if snapshot == nil {
-		secrets = &v1.SecretList{}
+func getSecretsFromSnapshot(s snapshotadapter.ApiSnapshot) snapshotadapter.SecretList {
+	var secrets snapshotadapter.SecretList
+	if s.Secrets == nil {
+		secrets = snapshotadapter.SliceCollection[*v1.Secret]{}
 	} else {
-		secrets = &snapshot.Secrets
+		secrets = s.Secrets
 	}
 	return secrets
 }
 
-func convertHeaderConfig(in *headers.HeaderManipulation, secrets *v1.SecretList, secretOptions api_conversion.HeaderSecretOptions) (*envoyHeaderManipulation, error) {
+func convertHeaderConfig(in *headers.HeaderManipulation, secrets snapshotadapter.SecretList, secretOptions api_conversion.HeaderSecretOptions) (*envoyHeaderManipulation, error) {
 	// request headers can either be made from a normal key/value pair, or.
 	// they can be constructed from a supplied secret. To accomplish this, we use
 	// a utility function that was originally created to accomplish this for health check headers.

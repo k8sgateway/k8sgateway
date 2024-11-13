@@ -177,7 +177,8 @@ func (t *translatorInstance) translateClusterSubsystemComponents(params plugins.
 	logger.Debugf("verifying upstream groups: %v", proxy.GetMetadata().GetName())
 	t.verifyUpstreamGroups(params, reports)
 
-	upstreamRefKeyToEndpoints := createUpstreamToEndpointsMap(params.Snapshot.Upstreams, params.Snapshot.Endpoints)
+	upstreams := params.Snapshot.Upstreams.List()
+	upstreamRefKeyToEndpoints := createUpstreamToEndpointsMap(upstreams, params.Snapshot.Endpoints.List())
 
 	// endpoints and listeners are shared between listeners
 	logger.Debugf("computing envoy clusters for proxy: %v", proxy.GetMetadata().GetName())
@@ -186,9 +187,9 @@ func (t *translatorInstance) translateClusterSubsystemComponents(params plugins.
 
 	endpoints := t.computeClusterEndpoints(params, upstreamRefKeyToEndpoints, reports)
 
-	upstreamMap := make(map[string]struct{}, len(params.Snapshot.Upstreams))
+	upstreamMap := make(map[string]struct{}, len(upstreams))
 	// make sure to call EndpointPlugin with empty endpoint
-	for _, upstream := range params.Snapshot.Upstreams {
+	for _, upstream := range upstreams {
 		key := UpstreamToClusterName(&core.ResourceRef{
 			Name:      upstream.GetMetadata().GetName(),
 			Namespace: upstream.GetMetadata().GetNamespace(),

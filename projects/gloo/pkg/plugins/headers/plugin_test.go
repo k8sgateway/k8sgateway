@@ -99,26 +99,27 @@ var _ = Describe("Plugin", func() {
 		Expect(out.ResponseHeadersToRemove).To(Equal(expectedHeadersOverwrite.ResponseHeadersToRemove))
 	})
 	It("Can add secrets to headers", func() {
-		paramsWithSecret := plugins.VirtualHostParams{
-			Params: plugins.Params{
-				Snapshot: &v1snap.ApiSnapshot{
-					Secrets: v1.SecretList{
-						{
-							Kind: &v1.Secret_Header{
-								Header: &v1.HeaderSecret{
-									Headers: map[string]string{
-										"Authorization": "basic dXNlcjpwYXNzd29yZA==",
-									},
-								},
-							},
-							Metadata: &coreV1.Metadata{
-								Name:      "foo",
-								Namespace: "bar",
+		params := plugins.Params{}
+		params.SetApiSnapshot(&v1snap.ApiSnapshot{
+			Secrets: v1.SecretList{
+				{
+					Kind: &v1.Secret_Header{
+						Header: &v1.HeaderSecret{
+							Headers: map[string]string{
+								"Authorization": "basic dXNlcjpwYXNzd29yZA==",
 							},
 						},
 					},
+					Metadata: &coreV1.Metadata{
+						Name:      "foo",
+						Namespace: "bar",
+					},
 				},
 			},
+		})
+
+		paramsWithSecret := plugins.VirtualHostParams{
+			Params: params,
 		}
 		out := &envoy_config_route_v3.VirtualHost{}
 		err := p.ProcessVirtualHost(paramsWithSecret, &v1.VirtualHost{
@@ -418,8 +419,9 @@ var _ = Describe("Plugin", func() {
 	})
 })
 
-var paramsWithSecret = plugins.Params{
-	Snapshot: &v1snap.ApiSnapshot{
+var paramsWithSecret = func() plugins.Params {
+	params := plugins.Params{}
+	params.SetApiSnapshot(&v1snap.ApiSnapshot{
 		Secrets: v1.SecretList{
 			{
 				Kind: &v1.Secret_Header{
@@ -435,8 +437,9 @@ var paramsWithSecret = plugins.Params{
 				},
 			},
 		},
-	},
-}
+	})
+	return params
+}()
 
 var testBrokenConfigNoRequestHeader = &headers.HeaderManipulation{
 	RequestHeadersToAdd:     []*envoycore_sk.HeaderValueOption{{HeaderOption: nil, Append: &wrappers.BoolValue{Value: true}}},

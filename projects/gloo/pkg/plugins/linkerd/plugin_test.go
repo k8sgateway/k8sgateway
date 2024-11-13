@@ -15,6 +15,7 @@ import (
 	"github.com/solo-io/gloo/projects/gloo/pkg/api/v1/options/static"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins"
 	"github.com/solo-io/gloo/projects/gloo/pkg/translator"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	"github.com/solo-io/solo-kit/pkg/api/v1/resources/core"
 	"github.com/solo-io/solo-kit/test/matchers"
 )
@@ -148,7 +149,7 @@ var _ = Describe("linkerd plugin", func() {
 			}
 			upstreams := createUpstream(usRf, nil)
 			outCopy := proto.Clone(out)
-			Expect(configForMultiDestination([]*v1.WeightedDestination{destinations}, v1.UpstreamList{upstreams}, out)).To(Succeed())
+			Expect(configForMultiDestination([]*v1.WeightedDestination{destinations}, snapshotadapter.ToSlice(v1.UpstreamList{upstreams}), out)).To(Succeed())
 			Expect(out).To(matchers.MatchProto(outCopy))
 		})
 		It("properly adds the header to existing weighted clusters with kube upstreams", func() {
@@ -175,7 +176,7 @@ var _ = Describe("linkerd plugin", func() {
 			}
 			upstreams := createUpstreamList(upstreamRefs, kubeSpecs)
 			outCopy := proto.Clone(out)
-			Expect(configForMultiDestination(destinations, upstreams, out)).To(Succeed())
+			Expect(configForMultiDestination(destinations, snapshotadapter.ToSlice(upstreams), out)).To(Succeed())
 			Expect(out).NotTo(BeEquivalentTo(outCopy))
 			routeAction := out.GetRoute()
 			Expect(routeAction).NotTo(BeNil())
@@ -211,7 +212,7 @@ var _ = Describe("linkerd plugin", func() {
 			}
 			upstreams := createUpstreamList(upstreamRefs, kubeSpecs)
 			outCopy := proto.Clone(out)
-			Expect(configForMultiDestination(destinations, upstreams, out)).To(Succeed())
+			Expect(configForMultiDestination(destinations, snapshotadapter.ToSlice(upstreams), out)).To(Succeed())
 			Expect(out).NotTo(BeEquivalentTo(outCopy))
 			routeAction := out.GetRoute()
 			Expect(routeAction).NotTo(BeNil())
@@ -253,9 +254,9 @@ var _ = Describe("linkerd plugin", func() {
 				},
 			}
 			upstreams := createUpstreamList(upstreamRefs, kubeSpecs)
-			params.Snapshot = &v1snap.ApiSnapshot{
+			params.SetApiSnapshot(&v1snap.ApiSnapshot{
 				Upstreams: upstreams,
-			}
+			})
 			in := &v1.Route{
 				Action: &v1.Route_RouteAction{
 					RouteAction: &v1.RouteAction{

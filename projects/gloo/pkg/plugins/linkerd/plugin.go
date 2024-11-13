@@ -7,6 +7,7 @@ import (
 	envoy_config_route_v3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	"github.com/golang/protobuf/ptypes/wrappers"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins/pluginutils"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 
 	usconversions "github.com/solo-io/gloo/projects/gloo/pkg/upstreams"
 
@@ -101,7 +102,7 @@ func (p *plugin) ProcessRoute(params plugins.RouteParams, in *v1.Route, out *env
 
 func configForMultiDestination(
 	destinations []*v1.WeightedDestination,
-	upstreams v1.UpstreamList,
+	upstreams snapshotadapter.UpstreamList,
 	out *envoy_config_route_v3.Route,
 ) error {
 	routeAction := out.GetRoute()

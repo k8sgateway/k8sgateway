@@ -13,6 +13,7 @@ import (
 	v1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1"
 	"github.com/solo-io/gloo/projects/gloo/pkg/api/v1/ssl"
 	"github.com/solo-io/gloo/projects/gloo/pkg/utils"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	gloohelpers "github.com/solo-io/gloo/test/helpers"
 	. "github.com/solo-io/go-utils/testutils"
 	"github.com/solo-io/solo-kit/pkg/api/v1/resources/core"
@@ -26,12 +27,12 @@ var _ = Describe("Ssl", func() {
 		downstreamCfg          *ssl.SslConfig
 		tlsSecret              *v1.TlsSecret
 		secret                 *v1.Secret
-		secrets                v1.SecretList
+		secrets                snapshotadapter.SecretList
 		configTranslator       utils.SslConfigTranslator
-		resolveCommonSslConfig func(cs utils.CertSource, secrets v1.SecretList) (*envoyauth.CommonTlsContext, error)
+		resolveCommonSslConfig func(cs utils.CertSource, secrets snapshotadapter.SecretList) (*envoyauth.CommonTlsContext, error)
 	)
 
-	resolveCommonSslConfig = func(cs utils.CertSource, secrets v1.SecretList) (*envoyauth.CommonTlsContext, error) {
+	resolveCommonSslConfig = func(cs utils.CertSource, secrets snapshotadapter.SecretList) (*envoyauth.CommonTlsContext, error) {
 		return configTranslator.ResolveCommonSslConfig(cs, secrets, false)
 	}
 
@@ -111,7 +112,7 @@ var _ = Describe("Ssl", func() {
 				},
 			}
 			ref := secret.Metadata.Ref()
-			secrets = v1.SecretList{secret}
+			secrets = snapshotadapter.SliceCollection[*v1.Secret]([]*v1.Secret{secret})
 			upstreamCfg = &ssl.UpstreamSslConfig{
 				Sni: "test.com",
 				SslSecrets: &ssl.UpstreamSslConfig_SecretRef{

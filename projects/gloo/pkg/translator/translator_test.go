@@ -94,6 +94,7 @@ var _ = Describe("Translator", func() {
 		upstream          *v1.Upstream
 		upName            *core.Metadata
 		proxy             *v1.Proxy
+		apiSnapshot       *v1snap.ApiSnapshot
 		params            plugins.Params
 		registeredPlugins []plugins.Plugin
 		matcher           *matchers.Matcher
@@ -160,25 +161,26 @@ var _ = Describe("Translator", func() {
 			},
 		}
 
-		params = plugins.Params{
-			Ctx: context.Background(),
-			Snapshot: &v1snap.ApiSnapshot{
-				Endpoints: v1.EndpointList{
-					{
-						Upstreams: []*core.ResourceRef{upName.Ref()},
-						Address:   "1.2.3.4",
-						Port:      32,
-						Metadata: &core.Metadata{
-							Name:      "test-ep",
-							Namespace: "gloo-system",
-						},
+		apiSnapshot = &v1snap.ApiSnapshot{
+			Endpoints: v1.EndpointList{
+				{
+					Upstreams: []*core.ResourceRef{upName.Ref()},
+					Address:   "1.2.3.4",
+					Port:      32,
+					Metadata: &core.Metadata{
+						Name:      "test-ep",
+						Namespace: "gloo-system",
 					},
 				},
-				Upstreams: v1.UpstreamList{
-					upstream,
-				},
+			},
+			Upstreams: v1.UpstreamList{
+				upstream,
 			},
 		}
+		params = plugins.Params{
+			Ctx: context.Background(),
+		}
+		params.SetApiSnapshot(apiSnapshot)
 		matcher = &matchers.Matcher{
 			PathSpecifier: &matchers.Matcher_Prefix{
 				Prefix: "/",
@@ -1178,10 +1180,11 @@ var _ = Describe("Translator", func() {
 		})
 
 		It("doesnt add resources to snapshot if hashing error", func() {
+			apiSnapshot = &v1snap.ApiSnapshot{}
 			params = plugins.Params{
-				Ctx:      context.Background(),
-				Snapshot: &v1snap.ApiSnapshot{},
+				Ctx: context.Background(),
 			}
+			params.SetApiSnapshot(apiSnapshot)
 			translateWithBuggyHasher()
 		})
 
@@ -1267,7 +1270,7 @@ var _ = Describe("Translator", func() {
 			var upstreamHeaders []*envoycore_sk.HeaderValueOption
 
 			BeforeEach(func() {
-				params.Snapshot.Secrets = v1.SecretList{
+				apiSnapshot.Secrets = v1.SecretList{
 					{
 						Kind: &v1.Secret_Header{
 							Header: &v1.HeaderSecret{
@@ -1348,7 +1351,7 @@ var _ = Describe("Translator", func() {
 				err := os.Setenv(api_conversion.MatchingNamespaceEnv, enforceMatch)
 				Expect(err).NotTo(HaveOccurred())
 
-				params.Snapshot.Secrets[0].Metadata.Namespace = secretNamespace
+				apiSnapshot.Secrets[0].Metadata.Namespace = secretNamespace
 				expectedResult[0].HealthChecker = &envoy_config_core_v3.HealthCheck_HttpHealthCheck_{
 					HttpHealthCheck: &envoy_config_core_v3.HealthCheck_HttpHealthCheck{
 						Host: "host",
@@ -1381,7 +1384,7 @@ var _ = Describe("Translator", func() {
 				err := os.Setenv(api_conversion.MatchingNamespaceEnv, enforceMatch)
 				Expect(err).NotTo(HaveOccurred())
 
-				params.Snapshot.Secrets[0].Metadata.Namespace = secretNamespace
+				apiSnapshot.Secrets[0].Metadata.Namespace = secretNamespace
 				expectedResult[0].HealthChecker = &envoy_config_core_v3.HealthCheck_GrpcHealthCheck_{
 					GrpcHealthCheck: &envoy_config_core_v3.HealthCheck_GrpcHealthCheck{
 						ServiceName:     "svc",
@@ -1569,8 +1572,8 @@ var _ = Describe("Translator", func() {
 			By("add the upstreams and compare the new version and http filters")
 
 			// add upstreams with same name
-			params.Snapshot.Upstreams = append(params.Snapshot.Upstreams, localUpstream1)
-			params.Snapshot.Upstreams = append(params.Snapshot.Upstreams, localUpstream2)
+			apiSnapshot.Upstreams = append(apiSnapshot.Upstreams, localUpstream1)
+			apiSnapshot.Upstreams = append(apiSnapshot.Upstreams, localUpstream2)
 			Expect(params.Snapshot.Upstreams).To(HaveLen(3))
 
 			translate()
@@ -1593,8 +1596,8 @@ var _ = Describe("Translator", func() {
 			By("add the upstreams in the opposite order and compare the version and http filters")
 
 			// add upstreams in the opposite order
-			params.Snapshot.Upstreams = append(params.Snapshot.Upstreams, localUpstream2)
-			params.Snapshot.Upstreams = append(params.Snapshot.Upstreams, localUpstream1)
+			apiSnapshot.Upstreams = append(apiSnapshot.Upstreams, localUpstream2)
+			apiSnapshot.Upstreams = append(apiSnapshot.Upstreams, localUpstream1)
 			Expect(params.Snapshot.Upstreams).To(HaveLen(3))
 
 			translate()
@@ -1709,8 +1712,8 @@ var _ = Describe("Translator", func() {
 					},
 				},
 			}
-			params.Snapshot.Upstreams = append(params.Snapshot.Upstreams, upstream2)
-			params.Snapshot.UpstreamGroups = v1.UpstreamGroupList{
+			apiSnapshot.Upstreams = append(apiSnapshot.Upstreams, upstream2)
+			apiSnapshot.UpstreamGroups = v1.UpstreamGroupList{
 				upstreamGroup,
 			}
 			ref := upstreamGroup.Metadata.Ref()
@@ -1815,7 +1818,7 @@ var _ = Describe("Translator", func() {
 				Kube: &v1kubernetes.UpstreamSpec{},
 			}
 			ref := upstream.Metadata.Ref()
-			params.Snapshot.Endpoints = v1.EndpointList{
+			apiSnapshot.Endpoints = v1.EndpointList{
 				{
 					Metadata: &core.Metadata{
 						Name:        "test",
@@ -1843,7 +1846,7 @@ var _ = Describe("Translator", func() {
 			Expect(claConfiguration).NotTo(BeNil())
 			Expect(claConfiguration.ClusterName).To(Equal(clusterName))
 			Expect(claConfiguration.Endpoints).To(HaveLen(1))
-			Expect(claConfiguration.Endpoints[0].LbEndpoints).To(HaveLen(len(params.Snapshot.Endpoints)))
+			Expect(claConfiguration.Endpoints[0].LbEndpoints).To(HaveLen(len(apiSnapshot.Endpoints)))
 			filterMetadata := claConfiguration.Endpoints[0].LbEndpoints[0].GetMetadata().GetFilterMetadata()
 
 			Expect(filterMetadata).NotTo(BeNil())
@@ -1870,7 +1873,7 @@ var _ = Describe("Translator", func() {
 				},
 			}
 			ref := upstream.Metadata.Ref()
-			params.Snapshot.Endpoints = v1.EndpointList{
+			apiSnapshot.Endpoints = v1.EndpointList{
 				{
 					Metadata: &core.Metadata{
 						Name:      "test",
@@ -1917,7 +1920,7 @@ var _ = Describe("Translator", func() {
 			Expect(claConfiguration).NotTo(BeNil())
 			Expect(claConfiguration.ClusterName).To(Equal(clusterName))
 			Expect(claConfiguration.Endpoints).To(HaveLen(1))
-			Expect(claConfiguration.Endpoints[0].LbEndpoints).To(HaveLen(len(params.Snapshot.Endpoints)))
+			Expect(claConfiguration.Endpoints[0].LbEndpoints).To(HaveLen(len(apiSnapshot.Endpoints)))
 		}
 
 		Context("when happy path", func() {
@@ -1977,7 +1980,7 @@ var _ = Describe("Translator", func() {
 		})
 
 		It("should create empty value if missing labels on the endpoint are provided in the upstream", func() {
-			params.Snapshot.Endpoints[0].Metadata.Labels = nil
+			apiSnapshot.Endpoints[0].Metadata.Labels = nil
 			translateWithEndpoints()
 			endpointMeta := claConfiguration.Endpoints[0].LbEndpoints[0].Metadata
 			Expect(endpointMeta).ToNot(BeNil())
@@ -2084,11 +2087,11 @@ var _ = Describe("Translator", func() {
 			}
 			// These are the "fake" upstreams that represent the above service in the snapshot
 			fakeUsList = kubernetes.KubeServicesToUpstreams(context.TODO(), skkube.ServiceList{svc})
-			params.Snapshot.Upstreams = append(params.Snapshot.Upstreams, fakeUsList...)
+			apiSnapshot.Upstreams = append(apiSnapshot.Upstreams, fakeUsList...)
 
 			// We need to manually add some fake endpoints for the above kubernetes services to the snapshot
 			// Normally these would have been discovered by EDS
-			params.Snapshot.Endpoints = v1.EndpointList{
+			apiSnapshot.Endpoints = v1.EndpointList{
 				{
 					Metadata: &core.Metadata{
 						Namespace: "gloo-system",
@@ -2214,11 +2217,11 @@ var _ = Describe("Translator", func() {
 			} else {
 				fakeUsList = v1.UpstreamList{}
 			}
-			params.Snapshot.Upstreams = append(params.Snapshot.Upstreams, fakeUsList...)
+			apiSnapshot.Upstreams = append(apiSnapshot.Upstreams, fakeUsList...)
 
 			// We need to manually add some fake endpoints for the above Consul service
 			// Normally these would have been discovered by EDS
-			params.Snapshot.Endpoints = v1.EndpointList{
+			apiSnapshot.Endpoints = v1.EndpointList{
 				// 2 prod endpoints, 1 in each data center, 1 dev endpoint in west data center
 				{
 					Metadata: &core.Metadata{
@@ -2364,7 +2367,7 @@ var _ = Describe("Translator", func() {
 		}
 
 		BeforeEach(func() {
-			params.Snapshot.Upstreams = append(params.Snapshot.Upstreams,
+			apiSnapshot.Upstreams = append(apiSnapshot.Upstreams,
 				createLambdaUpstream("my-namespace", "lambda-upstream-1", "us-east-1",
 					[]*aws.LambdaFunctionSpec{
 						{
@@ -2397,7 +2400,7 @@ var _ = Describe("Translator", func() {
 				},
 			}
 
-			params.Snapshot.Secrets = v1.SecretList{secret}
+			apiSnapshot.Secrets = v1.SecretList{secret}
 		})
 
 		It("has no errors when pointing to a valid lambda", func() {
@@ -2633,11 +2636,11 @@ var _ = Describe("Translator", func() {
 		BeforeEach(func() {
 			endpointPlugin = &endpointPluginMock{}
 			registeredPlugins = append(registeredPlugins, endpointPlugin)
-			upstreamList = params.Snapshot.Upstreams.Clone()
+			upstreamList = apiSnapshot.Upstreams.Clone()
 		})
 
 		AfterEach(func() {
-			params.Snapshot.Upstreams = upstreamList
+			apiSnapshot.Upstreams = upstreamList
 		})
 
 		It("should call the endpoint plugin", func() {
@@ -2677,7 +2680,7 @@ var _ = Describe("Translator", func() {
 					Consul: &consul2.UpstreamSpec{},
 				},
 			}
-			params.Snapshot.Upstreams = append(params.Snapshot.Upstreams, emptyUpstream)
+			apiSnapshot.Upstreams = append(apiSnapshot.Upstreams, emptyUpstream)
 
 			foundEmptyUpstream := false
 
@@ -2889,13 +2892,14 @@ var _ = Describe("Translator", func() {
 					SecretRef: ref,
 				},
 			}
+			apiSnapshot = &v1snap.ApiSnapshot{
+				Secrets:   v1.SecretList{secret},
+				Upstreams: v1.UpstreamList{upstream},
+			}
 			params = plugins.Params{
 				Ctx: context.Background(),
-				Snapshot: &v1snap.ApiSnapshot{
-					Secrets:   v1.SecretList{secret},
-					Upstreams: v1.UpstreamList{upstream},
-				},
 			}
+			params.SetApiSnapshot(apiSnapshot)
 		})
 
 		tlsContext := func() *envoyauth.UpstreamTlsContext {
@@ -3350,7 +3354,7 @@ var _ = Describe("Translator", func() {
 		})
 		Context("secret refs", func() {
 			It("should combine sni matches ", func() {
-				params.Snapshot.Secrets = append(params.Snapshot.Secrets, &v1.Secret{
+				apiSnapshot.Secrets = append(apiSnapshot.Secrets, &v1.Secret{
 					Metadata: &core.Metadata{
 						Name:      "solo",
 						Namespace: "solo.io",
@@ -3407,7 +3411,7 @@ var _ = Describe("Translator", func() {
 					IsCA:  true,
 				})
 
-				params.Snapshot.Secrets = append(params.Snapshot.Secrets, &v1.Secret{
+				apiSnapshot.Secrets = append(apiSnapshot.Secrets, &v1.Secret{
 					Metadata: &core.Metadata{
 						Name:      "solo",
 						Namespace: "solo.io",
@@ -3536,7 +3540,7 @@ var _ = Describe("Translator", func() {
 				Expect(listener.GetListenerFilters()[0].GetName()).To(Equal(wellknown.TlsInspector))
 			})
 			It("should error when different parameters have the same sni domains", func() {
-				params.Snapshot.Secrets = append(params.Snapshot.Secrets, &v1.Secret{
+				apiSnapshot.Secrets = append(apiSnapshot.Secrets, &v1.Secret{
 					Metadata: &core.Metadata{
 						Name:      "solo",
 						Namespace: "solo.io",
@@ -3579,7 +3583,7 @@ var _ = Describe("Translator", func() {
 					" same FilterChainMatch {server_names:\"a.com\"}. This is usually caused by overlapping sniDomains or multiple empty sniDomains in virtual services"))
 			})
 			It("should error when different parameters have no sni domains", func() {
-				params.Snapshot.Secrets = append(params.Snapshot.Secrets, &v1.Secret{
+				apiSnapshot.Secrets = append(apiSnapshot.Secrets, &v1.Secret{
 					Metadata: &core.Metadata{
 						Name:      "solo",
 						Namespace: "solo.io",
@@ -3620,7 +3624,7 @@ var _ = Describe("Translator", func() {
 					" same FilterChainMatch {}. This is usually caused by overlapping sniDomains or multiple empty sniDomains in virtual services"))
 			})
 			It("should work when different parameters have different sni domains", func() {
-				params.Snapshot.Secrets = append(params.Snapshot.Secrets, &v1.Secret{
+				apiSnapshot.Secrets = append(apiSnapshot.Secrets, &v1.Secret{
 					Metadata: &core.Metadata{
 						Name:      "solo",
 						Namespace: "solo.io",
@@ -3856,7 +3860,7 @@ var _ = Describe("Translator", func() {
 					},
 				},
 			}
-			params.Snapshot.Upstreams = append(params.Snapshot.Upstreams, upstreamNoProtocol)
+			apiSnapshot.Upstreams = append(apiSnapshot.Upstreams, upstreamNoProtocol)
 			translate()
 			clusters := snapshot.GetResources(types.ClusterTypeV3)
 			clusterResource := clusters.Items[fmt.Sprintf("%s_%s", name, namespace)]
@@ -3887,7 +3891,7 @@ var _ = Describe("Translator", func() {
 				},
 				ProtocolSelection: v1.Upstream_USE_CONFIGURED_PROTOCOL,
 			}
-			params.Snapshot.Upstreams = append(params.Snapshot.Upstreams, upstreamConfiguredProtocol)
+			apiSnapshot.Upstreams = append(apiSnapshot.Upstreams, upstreamConfiguredProtocol)
 			translate()
 			clusters := snapshot.GetResources(types.ClusterTypeV3)
 			clusterResource := clusters.Items[fmt.Sprintf("%s_%s", name, namespace)]
@@ -3917,7 +3921,7 @@ var _ = Describe("Translator", func() {
 				},
 				ProtocolSelection: v1.Upstream_USE_DOWNSTREAM_PROTOCOL,
 			}
-			params.Snapshot.Upstreams = append(params.Snapshot.Upstreams, upstreamDownstreamProtocol)
+			apiSnapshot.Upstreams = append(apiSnapshot.Upstreams, upstreamDownstreamProtocol)
 			translate()
 			clusters := snapshot.GetResources(types.ClusterTypeV3)
 			clusterResource := clusters.Items[fmt.Sprintf("%s_%s", name, namespace)]

@@ -7,6 +7,7 @@ import (
 	v1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins/pluginutils"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 )
 
 var (
@@ -124,7 +125,7 @@ func (p *plugin) ProcessWeightedDestination(
 	return pluginutils.SetWeightedClusterPerFilterConfig(out, wellknown.HTTPExternalAuthorization, extAuthPerRouteConfig)
 }
 
-func (p *plugin) isExtAuthzFilterConfigured(listener *v1.HttpListener, upstreams v1.UpstreamList) bool {
+func (p *plugin) isExtAuthzFilterConfigured(listener *v1.HttpListener, upstreams snapshotadapter.UpstreamList) bool {
 	// Call the same function called by HttpFilters to verify whether the filter was created
 	stagedFilters, err := BuildStagedHttpFilters(func() ([]*envoyauth.ExtAuthz, error) {
 		return p.extAuthzConfigGenerator.GenerateListenerExtAuthzConfig(listener, upstreams)

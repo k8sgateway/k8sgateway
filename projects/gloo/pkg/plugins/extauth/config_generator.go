@@ -7,6 +7,7 @@ import (
 
 	"github.com/solo-io/gloo/pkg/utils/regexutils"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins/pluginutils"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 
 	envoycore "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	envoyauth "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/ext_authz/v3"
@@ -38,7 +39,7 @@ var (
 
 type ExtAuthzConfigGenerator interface {
 	IsMulti() bool
-	GenerateListenerExtAuthzConfig(listener *v1.HttpListener, upstreams v1.UpstreamList) ([]*envoyauth.ExtAuthz, error)
+	GenerateListenerExtAuthzConfig(listener *v1.HttpListener, upstreams snapshotadapter.UpstreamList) ([]*envoyauth.ExtAuthz, error)
 	GenerateVirtualHostExtAuthzConfig(virtualHost *v1.VirtualHost, params plugins.VirtualHostParams) (*envoyauth.ExtAuthzPerRoute, error)
 	GenerateRouteExtAuthzConfig(route *v1.Route) (*envoyauth.ExtAuthzPerRoute, error)
 	GenerateWeightedDestinationExtAuthzConfig(weightedDestination *v1.WeightedDestination) (*envoyauth.ExtAuthzPerRoute, error)
@@ -67,7 +68,7 @@ func (d *DefaultConfigGenerator) IsMulti() bool {
 	return false
 }
 
-func (d *DefaultConfigGenerator) GenerateListenerExtAuthzConfig(listener *v1.HttpListener, upstreams v1.UpstreamList) ([]*envoyauth.ExtAuthz, error) {
+func (d *DefaultConfigGenerator) GenerateListenerExtAuthzConfig(listener *v1.HttpListener, upstreams snapshotadapter.UpstreamList) ([]*envoyauth.ExtAuthz, error) {
 	// If extauth isn't defined on the listener, fallback to the default extauth settings
 	settings := listener.GetOptions().GetExtauth()
 	if settings == nil {
@@ -191,7 +192,7 @@ func (m *MultiConfigGenerator) IsMulti() bool {
 	return true
 }
 
-func (m *MultiConfigGenerator) GenerateListenerExtAuthzConfig(listener *v1.HttpListener, upstreams v1.UpstreamList) ([]*envoyauth.ExtAuthz, error) {
+func (m *MultiConfigGenerator) GenerateListenerExtAuthzConfig(listener *v1.HttpListener, upstreams snapshotadapter.UpstreamList) ([]*envoyauth.ExtAuthz, error) {
 	return nil, extauth.ErrEnterpriseOnly
 }
 
@@ -215,7 +216,7 @@ func BuildStagedHttpFilters(configurationGenerator func() ([]*envoyauth.ExtAuthz
 	return filters, nil
 }
 
-func GenerateEnvoyConfigForFilter(settings *extauthv1.Settings, upstreams v1.UpstreamList) (*envoyauth.ExtAuthz, error) {
+func GenerateEnvoyConfigForFilter(settings *extauthv1.Settings, upstreams snapshotadapter.UpstreamList) (*envoyauth.ExtAuthz, error) {
 	extauthUpstreamRef := settings.GetExtauthzServerRef()
 	if extauthUpstreamRef == nil {
 		return nil, NoServerRefErr

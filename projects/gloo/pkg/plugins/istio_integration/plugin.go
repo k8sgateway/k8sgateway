@@ -7,6 +7,7 @@ import (
 	v1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins/pluginutils"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	"github.com/solo-io/go-utils/contextutils"
 )
 
@@ -80,7 +81,7 @@ func (p *plugin) ProcessRoute(params plugins.RouteParams, in *v1.Route, out *env
 // Return the hostname to rewrite: serviceName.namespace if the destination is a kubernetes upstream or kube destination
 // Return an empty string for another type of destination
 // Return an error if the destination is a gloo upstream and we cannot look it up
-func GetHostFromDestination(dest *v1.RouteAction_Single, upstreams v1.UpstreamList) (string, error) {
+func GetHostFromDestination(dest *v1.RouteAction_Single, upstreams snapshotadapter.UpstreamList) (string, error) {
 	var name, namespace string
 	if single, ok := dest.Single.GetDestinationType().(*v1.Destination_Upstream); ok {
 		us, err := upstreams.Find(single.Upstream.GetNamespace(), single.Upstream.GetName())

@@ -28,6 +28,7 @@ import (
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins"
 	syncerstats "github.com/solo-io/gloo/projects/gloo/pkg/syncer/stats"
 	"github.com/solo-io/gloo/projects/gloo/pkg/utils"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	"github.com/solo-io/gloo/projects/gloo/pkg/xds"
 )
 
@@ -156,10 +157,11 @@ func (s *translatorSyncer) syncEnvoy(ctx context.Context, snap *v1snap.ApiSnapsh
 			proxyCtx = ctxWithTags
 		}
 
+		newSnap := snapshotadapter.FromApiSnapshot(snap)
 		params := plugins.Params{
 			Ctx:      proxyCtx,
 			Settings: s.settings,
-			Snapshot: snap,
+			Snapshot: newSnap,
 			Messages: map[*core.ResourceRef][]string{},
 		}
 

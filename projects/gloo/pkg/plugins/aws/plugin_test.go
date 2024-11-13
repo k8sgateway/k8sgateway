@@ -42,6 +42,7 @@ var _ = Describe("Plugin", func() {
 		ctx         context.Context
 		cancel      context.CancelFunc
 		initParams  plugins.InitParams
+		snapshot    *v1snap.ApiSnapshot
 		params      plugins.Params
 		vhostParams plugins.VirtualHostParams
 		awsPlugin   plugins.Plugin
@@ -118,7 +119,7 @@ var _ = Describe("Plugin", func() {
 		}
 
 		initParams = plugins.InitParams{}
-		params.Snapshot = &v1snap.ApiSnapshot{
+		snapshot = &v1snap.ApiSnapshot{
 			Secrets: v1.SecretList{{
 				Metadata: &core.Metadata{
 					Name:      "secretref",
@@ -132,6 +133,7 @@ var _ = Describe("Plugin", func() {
 				},
 			}},
 		}
+		params.SetApiSnapshot(snapshot)
 		vhostParams = plugins.VirtualHostParams{Params: params}
 		lpe = &AWSLambdaProtocolExtension{}
 	})
@@ -166,13 +168,13 @@ var _ = Describe("Plugin", func() {
 		})
 
 		It("should error upstream with no secrets", func() {
-			params.Snapshot.Secrets = nil
+			snapshot.Secrets = nil
 			err := awsPlugin.(plugins.UpstreamPlugin).ProcessUpstream(params, upstream, out)
 			Expect(err).To(HaveOccurred())
 		})
 
 		It("should error non aws secret", func() {
-			params.Snapshot.Secrets[0].Kind = &v1.Secret_Tls{}
+			snapshot.Secrets[0].Kind = &v1.Secret_Tls{}
 			err := awsPlugin.(plugins.UpstreamPlugin).ProcessUpstream(params, upstream, out)
 			Expect(err.Error()).To(Equal(`secret (secretref.ns) is not an AWS secret`))
 		})
@@ -184,22 +186,22 @@ var _ = Describe("Plugin", func() {
 		})
 
 		It("should error upstream with no access_key", func() {
-			params.Snapshot.Secrets[0].Kind.(*v1.Secret_Aws).Aws.AccessKey = ""
+			snapshot.Secrets[0].Kind.(*v1.Secret_Aws).Aws.AccessKey = ""
 			err := awsPlugin.(plugins.UpstreamPlugin).ProcessUpstream(params, upstream, out)
 			Expect(err).To(HaveOccurred())
 		})
 		It("should error upstream with no secret_key", func() {
-			params.Snapshot.Secrets[0].Kind.(*v1.Secret_Aws).Aws.SecretKey = ""
+			snapshot.Secrets[0].Kind.(*v1.Secret_Aws).Aws.SecretKey = ""
 			err := awsPlugin.(plugins.UpstreamPlugin).ProcessUpstream(params, upstream, out)
 			Expect(err).To(HaveOccurred())
 		})
 		It("should error upstream with invalid access_key", func() {
-			params.Snapshot.Secrets[0].Kind.(*v1.Secret_Aws).Aws.AccessKey = "\xffbinary!"
+			snapshot.Secrets[0].Kind.(*v1.Secret_Aws).Aws.AccessKey = "\xffbinary!"
 			err := awsPlugin.(plugins.UpstreamPlugin).ProcessUpstream(params, upstream, out)
 			Expect(err).To(HaveOccurred())
 		})
 		It("should error upstream with invalid secret_key", func() {
-			params.Snapshot.Secrets[0].Kind.(*v1.Secret_Aws).Aws.SecretKey = "\xffbinary!"
+			snapshot.Secrets[0].Kind.(*v1.Secret_Aws).Aws.SecretKey = "\xffbinary!"
 			err := awsPlugin.(plugins.UpstreamPlugin).ProcessUpstream(params, upstream, out)
 			Expect(err).To(HaveOccurred())
 		})
@@ -712,7 +714,7 @@ var _ = Describe("Plugin", func() {
 				Namespace: "ns",
 				Name:      "secretref",
 			}
-			awsSecret := params.Snapshot.Secrets[0].GetAws()
+			awsSecret := snapshot.Secrets[0].GetAws()
 			awsSecret.SessionToken = sessionTokenValue
 
 			process()
@@ -793,7 +795,7 @@ var _ = Describe("Plugin", func() {
 				Namespace: "ns",
 				Name:      "secretref",
 			}
-			awsSecret := params.Snapshot.Secrets[0].GetAws()
+			awsSecret := snapshot.Secrets[0].GetAws()
 			awsSecret.SessionToken = sessionTokenValue
 
 			process()

@@ -34,6 +34,7 @@ import (
 	. "github.com/solo-io/gloo/projects/gloo/pkg/translator"
 	mock_consul "github.com/solo-io/gloo/projects/gloo/pkg/upstreams/consul/mocks"
 	"github.com/solo-io/gloo/projects/gloo/pkg/utils"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	"github.com/solo-io/gloo/projects/gloo/pkg/utils/validation"
 	. "github.com/solo-io/gloo/projects/gloo/pkg/validation"
 	"github.com/solo-io/gloo/test/samples"
@@ -51,6 +52,7 @@ var _ = Describe("Validation Server", func() {
 		ctrl              *gomock.Controller
 		settings          *v1.Settings
 		translator        Translator
+		snapshot          *v1snap.ApiSnapshot
 		params            plugins.Params
 		registeredPlugins []plugins.Plugin
 		xdsSanitizer      sanitizer.XdsSanitizers
@@ -81,10 +83,10 @@ var _ = Describe("Validation Server", func() {
 			KubeCoreCache: kubeCoreCache,
 		}
 		registeredPlugins = registry.Plugins(registry.FromBootstrap(opts))
-
+		snapshot = samples.SimpleGlooSnapshot("gloo-system")
 		params = plugins.Params{
 			Ctx:      context.Background(),
-			Snapshot: samples.SimpleGlooSnapshot("gloo-system"),
+			Snapshot: snapshotadapter.FromApiSnapshot(snapshot),
 		}
 
 		routeReplacingSanitizer, _ := sanitizer.NewRouteReplacingSanitizer(settings.GetGloo().GetInvalidConfigPolicy())
@@ -113,9 +115,9 @@ var _ = Describe("Validation Server", func() {
 		var s Validator
 		Context("validates the requested proxy", func() {
 			It("works with Validate", func() {
-				proxy := params.Snapshot.Proxies[0]
+				proxy := snapshot.Proxies[0]
 				s := NewValidator(vc)
-				_ = s.Sync(context.Background(), params.Snapshot)
+				_ = s.Sync(context.Background(), snapshot)
 				rpt, err := s.Validate(context.Background(), &validationgrpc.GlooValidationServiceRequest{Proxy: proxy})
 				Expect(err).NotTo(HaveOccurred())
 				Expect(rpt).To(matchers.MatchProto(&validationgrpc.GlooValidationServiceResponse{
@@ -129,9 +131,9 @@ var _ = Describe("Validation Server", func() {
 				}))
 			})
 			It("works with Validate Gloo", func() {
-				proxy := params.Snapshot.Proxies[0]
+				proxy := snapshot.Proxies[0]
 				s := NewValidator(vc)
-				_ = s.Sync(context.Background(), params.Snapshot)
+				_ = s.Sync(context.Background(), snapshot)
 				rpt, err := s.ValidateGloo(context.Background(), proxy, nil, false)
 				Expect(err).NotTo(HaveOccurred())
 				r := rpt[0]
@@ -143,7 +145,7 @@ var _ = Describe("Validation Server", func() {
 
 		Context("updates the proxy report when sanitization causes a change", func() {
 			JustBeforeEach(func() {
-				proxy = params.Snapshot.Proxies[0]
+				proxy = snapshot.Proxies[0]
 				// Update proxy so that it includes an invalid definition - the nil destination type should
 				// raise an error since the destination type is not specified
 				errorRouteAction := &v1.Route_RouteAction{
@@ -159,7 +161,7 @@ var _ = Describe("Validation Server", func() {
 				proxy.GetListeners()[2].GetHybridListener().GetMatchedListeners()[0].GetHttpListener().GetVirtualHosts()[0].GetRoutes()[0].Action = errorRouteAction
 
 				s = NewValidator(vc)
-				_ = s.Sync(context.Background(), params.Snapshot)
+				_ = s.Sync(context.Background(), snapshot)
 			})
 
 			validateProxyReport := func(proxyReport *validationgrpc.ProxyReport, proxy *v1.Proxy) {
@@ -193,17 +195,17 @@ var _ = Describe("Validation Server", func() {
 			var proxy1, proxy2 *v1.Proxy
 
 			JustBeforeEach(func() {
-				proxy1 = params.Snapshot.Proxies[0]
+				proxy1 = snapshot.Proxies[0]
 				proxy2 = &v1.Proxy{
 					Metadata: &core.Metadata{
 						Name:      "proxy2",
 						Namespace: "gloo-system",
 					},
 				}
-				params.Snapshot.Proxies = v1.ProxyList{proxy1, proxy2}
+				snapshot.Proxies = v1.ProxyList{proxy1, proxy2}
 
 				s = NewValidator(vc)
-				_ = s.Sync(context.Background(), params.Snapshot)
+				_ = s.Sync(context.Background(), snapshot)
 			})
 
 			validateProxyAndReport := func(proxy *v1.Proxy, proxyToMatch *v1.Proxy, proxyReport *validationgrpc.ProxyReport) {
@@ -254,9 +256,9 @@ var _ = Describe("Validation Server", func() {
 			}
 
 			JustBeforeEach(func() {
-				params.Snapshot.Upstreams = v1.UpstreamList{}
+				snapshot.Upstreams = v1.UpstreamList{}
 				s = NewValidator(vc)
-				_ = s.Sync(context.Background(), params.Snapshot)
+				_ = s.Sync(context.Background(), snapshot)
 				upstream = v1.Upstream{
 					Metadata: &core.Metadata{Name: "other-upstream", Namespace: "other-namespace"},
 				}
@@ -306,7 +308,7 @@ var _ = Describe("Validation Server", func() {
 			}
 
 			It("works with Validate", func() {
-				_ = s.Sync(context.Background(), params.Snapshot)
+				_ = s.Sync(context.Background(), snapshot)
 				resp, err := s.Validate(context.Background(), &validationgrpc.GlooValidationServiceRequest{
 					Resources: &validationgrpc.GlooValidationServiceRequest_DeletedResources{
 						DeletedResources: &validationgrpc.DeletedResources{
@@ -322,7 +324,7 @@ var _ = Describe("Validation Server", func() {
 			})
 
 			It("works with Gloo Validate", func() {
-				_ = s.Sync(context.Background(), params.Snapshot)
+				_ = s.Sync(context.Background(), snapshot)
 				reports, err := s.ValidateGloo(context.Background(), nil, &upstream, true)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(reports).To(HaveLen(1))
@@ -355,7 +357,7 @@ var _ = Describe("Validation Server", func() {
 					UpstreamType: usType,
 				}
 
-				params.Snapshot.Upstreams = append(params.Snapshot.Upstreams, &upstream, &kubeSvcUpstream)
+				snapshot.Upstreams = append(snapshot.Upstreams, &upstream, &kubeSvcUpstream)
 				s = NewValidator(vc)
 			})
 
@@ -367,7 +369,7 @@ var _ = Describe("Validation Server", func() {
 			}
 
 			It("works with Validate", func() {
-				_ = s.Sync(context.Background(), params.Snapshot)
+				_ = s.Sync(context.Background(), snapshot)
 				resp, err := s.Validate(context.Background(), &validationgrpc.GlooValidationServiceRequest{
 					Resources: &validationgrpc.GlooValidationServiceRequest_DeletedResources{
 						DeletedResources: &validationgrpc.DeletedResources{
@@ -384,7 +386,7 @@ var _ = Describe("Validation Server", func() {
 			})
 
 			It("works with Gloo Validate", func() {
-				_ = s.Sync(context.Background(), params.Snapshot)
+				_ = s.Sync(context.Background(), snapshot)
 				reports, err := s.ValidateGloo(context.Background(), nil, &upstream, true)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(reports).To(HaveLen(1))
@@ -402,7 +404,7 @@ var _ = Describe("Validation Server", func() {
 					Metadata: &core.Metadata{Name: "test", Namespace: "gloo-system"},
 				}
 				s = NewValidator(vc)
-				_ = s.Sync(context.Background(), params.Snapshot)
+				_ = s.Sync(context.Background(), snapshot)
 			})
 
 			validateProxyReport := func(proxyReport *validationgrpc.ProxyReport) {
@@ -441,7 +443,7 @@ var _ = Describe("Validation Server", func() {
 
 			JustBeforeEach(func() {
 				s = NewValidator(vc)
-				_ = s.Sync(context.Background(), params.Snapshot)
+				_ = s.Sync(context.Background(), snapshot)
 				secret = v1.Secret{
 					Metadata: &core.Metadata{Name: "unused-secret", Namespace: "gloo-system"},
 				}
@@ -483,7 +485,7 @@ var _ = Describe("Validation Server", func() {
 
 			JustBeforeEach(func() {
 				s = NewValidator(vc)
-				_ = s.Sync(context.Background(), params.Snapshot)
+				_ = s.Sync(context.Background(), snapshot)
 				secret = v1.Secret{
 					Metadata: &core.Metadata{Name: "secret", Namespace: "gloo-system"},
 				}
@@ -705,9 +707,10 @@ var _ = Describe("Validation Server", func() {
 			}
 			registeredPlugins = registry.Plugins(registry.FromBootstrap(opts))
 
+			snapshot = samples.SimpleGlooSnapshot("gloo-system")
 			params = plugins.Params{
 				Ctx:      context.Background(),
-				Snapshot: samples.SimpleGlooSnapshot("gloo-system"),
+				Snapshot: snapshotadapter.FromApiSnapshot(snapshot),
 				Settings: settings,
 			}
 
@@ -739,7 +742,7 @@ var _ = Describe("Validation Server", func() {
 			Context("route options validation", func() {
 				JustBeforeEach(func() {
 					s = NewValidator(vc)
-					_ = s.Sync(context.Background(), params.Snapshot)
+					_ = s.Sync(context.Background(), snapshot)
 					updatedParams = params
 
 				})
@@ -754,11 +757,12 @@ var _ = Describe("Validation Server", func() {
 							},
 						},
 					}
-					updatedParams.Snapshot = samples.SimpleGlooSnapshotWithRouteOptions(routeOpts, "gloo-system")
+					updatedSnapshot := samples.SimpleGlooSnapshotWithRouteOptions(routeOpts, "gloo-system")
+					updatedParams.Snapshot = snapshotadapter.FromApiSnapshot(updatedSnapshot)
 
-					virtualService := updatedParams.Snapshot.VirtualServices[0]
-					proxy := updatedParams.Snapshot.Proxies[0]
-					_ = s.Sync(context.Background(), updatedParams.Snapshot)
+					virtualService := updatedSnapshot.VirtualServices[0]
+					proxy := updatedSnapshot.Proxies[0]
+					_ = s.Sync(context.Background(), updatedSnapshot)
 					reports, err := s.ValidateGloo(context.Background(), proxy, virtualService, false)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(reports).To(HaveLen(1))
@@ -809,11 +813,12 @@ var _ = Describe("Validation Server", func() {
 						},
 					}
 
-					updatedParams.Snapshot = samples.CustomGlooSnapshot(route, samples.SimpleUpstream(), samples.SimpleSecret(), "gloo-system")
+					updatedSnapshot := samples.CustomGlooSnapshot(route, samples.SimpleUpstream(), samples.SimpleSecret(), "gloo-system")
+					updatedParams.Snapshot = snapshotadapter.FromApiSnapshot(updatedSnapshot)
 
-					virtualService := updatedParams.Snapshot.VirtualServices[0]
-					proxy := updatedParams.Snapshot.Proxies[0]
-					_ = s.Sync(context.Background(), updatedParams.Snapshot)
+					virtualService := updatedSnapshot.VirtualServices[0]
+					proxy := updatedSnapshot.Proxies[0]
+					_ = s.Sync(context.Background(), updatedSnapshot)
 					reports, err := s.ValidateGloo(context.Background(), proxy, virtualService, false)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(reports).To(HaveLen(1))

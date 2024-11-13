@@ -24,9 +24,9 @@ import (
 	"github.com/golang/protobuf/proto"
 	validationapi "github.com/solo-io/gloo/projects/gloo/pkg/api/grpc/validation"
 	v1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1"
-	v1snap "github.com/solo-io/gloo/projects/gloo/pkg/api/v1/gloosnapshot"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins"
 	"github.com/solo-io/gloo/projects/gloo/pkg/utils"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	"github.com/solo-io/gloo/projects/gloo/pkg/utils/validation"
 )
 
@@ -277,7 +277,7 @@ func (h *httpFilterChainTranslator) getSslConfigurationWithDefaults() []*ssl.Ssl
 }
 
 func (h *httpFilterChainTranslator) createFilterChainsFromSslConfiguration(
-	snap *v1snap.ApiSnapshot,
+	snap snapshotadapter.ApiSnapshot,
 	networkFilters []*envoy_config_listener_v3.Filter,
 	sslConfigurations []*ssl.SslConfig,
 ) []*plugins.ExtendedFilterChain {

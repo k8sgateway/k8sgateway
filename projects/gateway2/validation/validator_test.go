@@ -18,7 +18,6 @@ import (
 	v1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1"
 	"github.com/solo-io/gloo/projects/gloo/pkg/api/v1/options/faultinjection"
 	"github.com/solo-io/gloo/projects/gloo/pkg/bootstrap"
-	"github.com/solo-io/gloo/projects/gloo/pkg/plugins"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins/registry"
 	"github.com/solo-io/gloo/projects/gloo/pkg/syncer/sanitizer"
 	"github.com/solo-io/gloo/projects/gloo/pkg/translator"
@@ -100,12 +99,9 @@ var _ = Describe("Kube Gateway API Policy Validation Helper", func() {
 		gv := gloovalidation.NewValidator(vc)
 
 		rtOpt := routeOptWithBadConfig()
-		params := plugins.Params{
-			Ctx:      ctx,
-			Snapshot: samples.SimpleGlooSnapshot("gloo-system"),
-		}
-		proxies, _ := validation.TranslateK8sGatewayProxies(ctx, params.Snapshot, rtOpt)
-		gv.Sync(ctx, params.Snapshot)
+		snap := samples.SimpleGlooSnapshot("gloo-system")
+		proxies, _ := validation.TranslateK8sGatewayProxies(ctx, snap, rtOpt)
+		gv.Sync(ctx, snap)
 		rpt, err := gv.ValidateGloo(ctx, proxies[0], rtOpt, false)
 		Expect(err).NotTo(HaveOccurred())
 		err = validation.GetSimpleErrorFromGlooValidation(rpt, proxies[0])
@@ -121,12 +117,9 @@ var _ = Describe("Kube Gateway API Policy Validation Helper", func() {
 		gv := gloovalidation.NewValidator(vc)
 
 		rtOpt := routeOptWithGoodConfig()
-		params := plugins.Params{
-			Ctx:      ctx,
-			Snapshot: samples.SimpleGlooSnapshot("gloo-system"),
-		}
-		proxies, _ := validation.TranslateK8sGatewayProxies(ctx, params.Snapshot, rtOpt)
-		gv.Sync(ctx, params.Snapshot)
+		snap := samples.SimpleGlooSnapshot("gloo-system")
+		proxies, _ := validation.TranslateK8sGatewayProxies(ctx, snap, rtOpt)
+		gv.Sync(ctx, snap)
 		rpt, err := gv.ValidateGloo(ctx, proxies[0], rtOpt, false)
 		Expect(err).NotTo(HaveOccurred())
 		err = validation.GetSimpleErrorFromGlooValidation(rpt, proxies[0])
@@ -139,13 +132,10 @@ var _ = Describe("Kube Gateway API Policy Validation Helper", func() {
 	It("validates and a rejects a bad VirtualHostOption", func() {
 		gv := gloovalidation.NewValidator(vc)
 
-		params := plugins.Params{
-			Ctx:      ctx,
-			Snapshot: samples.SimpleGlooSnapshot("gloo-system"),
-		}
+		snap := samples.SimpleGlooSnapshot("gloo-system")
 		vhost := vHostOptWithBadConfig()
-		proxies, _ := validation.TranslateK8sGatewayProxies(ctx, params.Snapshot, vhost)
-		gv.Sync(ctx, params.Snapshot)
+		proxies, _ := validation.TranslateK8sGatewayProxies(ctx, snap, vhost)
+		gv.Sync(ctx, snap)
 		rpt, err := gv.ValidateGloo(ctx, proxies[0], vhost, false)
 		Expect(err).NotTo(HaveOccurred())
 		err = validation.GetSimpleErrorFromGlooValidation(rpt, proxies[0])
@@ -160,13 +150,10 @@ var _ = Describe("Kube Gateway API Policy Validation Helper", func() {
 	It("validates and accepts a good VirtualHostOption", func() {
 		gv := gloovalidation.NewValidator(vc)
 
-		params := plugins.Params{
-			Ctx:      ctx,
-			Snapshot: samples.SimpleGlooSnapshot("gloo-system"),
-		}
+		snap := samples.SimpleGlooSnapshot("gloo-system")
 		vhost := vHostOptWithGoodConfig()
-		proxies, _ := validation.TranslateK8sGatewayProxies(ctx, params.Snapshot, vhost)
-		gv.Sync(ctx, params.Snapshot)
+		proxies, _ := validation.TranslateK8sGatewayProxies(ctx, snap, vhost)
+		gv.Sync(ctx, snap)
 		rpt, err := gv.ValidateGloo(ctx, proxies[0], vhost, false)
 		Expect(err).NotTo(HaveOccurred())
 		err = validation.GetSimpleErrorFromGlooValidation(rpt, proxies[0])

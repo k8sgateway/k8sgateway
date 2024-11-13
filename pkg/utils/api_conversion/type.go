@@ -8,6 +8,7 @@ import (
 	envoytype_gloo "github.com/solo-io/gloo/projects/gloo/pkg/api/external/envoy/type"
 	v1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1"
 	"github.com/solo-io/gloo/projects/gloo/pkg/plugins/utils/headers"
+	"github.com/solo-io/gloo/projects/gloo/pkg/utils/snapshotadapter"
 	envoycore_sk "github.com/solo-io/solo-kit/pkg/api/external/envoy/api/v2/core"
 	"github.com/solo-io/solo-kit/pkg/errors"
 )
@@ -58,7 +59,7 @@ func ToEnvoyInt64Range(int64Range *envoytype_gloo.Int64Range) *envoy_type_v3.Int
 	}
 }
 
-func ToEnvoyHeaderValueOptionList(option []*envoycore_sk.HeaderValueOption, secrets *v1.SecretList, secretOptions HeaderSecretOptions) ([]*envoy_config_core_v3.HeaderValueOption, error) {
+func ToEnvoyHeaderValueOptionList(option []*envoycore_sk.HeaderValueOption, secrets snapshotadapter.SecretList, secretOptions HeaderSecretOptions) ([]*envoy_config_core_v3.HeaderValueOption, error) {
 	result := make([]*envoy_config_core_v3.HeaderValueOption, 0)
 	var err error
 	var opts []*envoy_config_core_v3.HeaderValueOption
@@ -90,7 +91,7 @@ func CheckForbiddenCustomHeaders(header envoycore_sk.HeaderValue) error {
 	return nil
 }
 
-func ToEnvoyHeaderValueOptions(option *envoycore_sk.HeaderValueOption, secrets *v1.SecretList, secretOptions HeaderSecretOptions) ([]*envoy_config_core_v3.HeaderValueOption, error) {
+func ToEnvoyHeaderValueOptions(option *envoycore_sk.HeaderValueOption, secrets snapshotadapter.SecretList, secretOptions HeaderSecretOptions) ([]*envoy_config_core_v3.HeaderValueOption, error) {
 	appendAction := envoy_config_core_v3.HeaderValueOption_APPEND_IF_EXISTS_OR_ADD
 	if appendOption := option.GetAppend(); appendOption != nil {
 		if appendOption.GetValue() == false {
