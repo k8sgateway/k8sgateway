@@ -19,6 +19,7 @@ const (
 var (
 	setupOtelcolManifest  = filepath.Join(util.MustGetThisDir(), "testdata", "setup-otelcol.yaml")
 	tracingConfigManifest = filepath.Join(util.MustGetThisDir(), "testdata", "tracing.yaml")
+	gatewayConfigManifest = filepath.Join(util.MustGetThisDir(), "testdata", "gateway.yaml")
 
 	otelcolPod = &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "otel-collector", Namespace: "default"},
