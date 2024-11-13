@@ -11,6 +11,7 @@ import (
 
 	errors "github.com/rotisserie/eris"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 
@@ -161,7 +162,7 @@ func newEndpointsWatcher(kubeCoreCache corecache.KubeCoreCache, namespaces []str
 }
 
 func (c *edsWatcher) List(writeNamespace string, opts clients.ListOpts) (v1.EndpointList, error) {
-	var endpointList []*corev1.Endpoints
+	var endpointSliceList []*discoveryv1.EndpointSlice
 	var serviceList []*corev1.Service
 	var podList []*corev1.Pod
 	ctx := contextutils.WithLogger(opts.Ctx, "kubernetes_eds")
@@ -184,14 +185,14 @@ func (c *edsWatcher) List(writeNamespace string, opts clients.ListOpts) (v1.Endp
 		}
 		podList = append(podList, pods...)
 
-		endpoints, err := c.kubeShareFactory.EndpointsLister(ns).List(labels.SelectorFromSet(opts.Selector))
+		endpoints, err := c.kubeShareFactory.EndpointSliceLister(ns).List(labels.SelectorFromSet(opts.Selector))
 		if err != nil {
 			return nil, err
 		}
-		endpointList = append(endpointList, endpoints...)
+		endpointSliceList = append(endpointSliceList, endpoints...)
 	}
 
-	eps, warns, errsToLog := FilterEndpoints(ctx, writeNamespace, endpointList, serviceList, podList, c.upstreams)
+	eps, warns, errsToLog := FilterEndpoints(ctx, writeNamespace, endpointSliceList, serviceList, podList, c.upstreams)
 
 	warnsToLog = append(warnsToLog, warns...)
 
@@ -329,7 +330,7 @@ func getServiceFromUpstreamSpec(spec *kubeplugin.UpstreamSpec, services []*corev
 func FilterEndpoints(
 	_ context.Context, // do not use for logging! return logging messages as strings and log them after hashing (see https://github.com/solo-io/gloo/issues/3761)
 	writeNamespace string,
-	kubeEndpoints []*corev1.Endpoints,
+	kubeEndpointSlices []*discoveryv1.EndpointSlice,
 	services []*corev1.Service,
 	pods []*corev1.Pod,
 	upstreams map[*core.ResourceRef]*kubeplugin.UpstreamSpec,
@@ -338,7 +339,7 @@ func FilterEndpoints(
 
 	return computeGlooEndpoints(
 		writeNamespace,
-		kubeEndpoints,
+		kubeEndpointSlices,
 		services,
 		podLabelSource,
 		upstreams,
@@ -347,7 +348,7 @@ func FilterEndpoints(
 
 func computeGlooEndpoints(
 	writeNamespace string,
-	kubeEndpoints []*corev1.Endpoints,
+	kubeEndpointSlices []*discoveryv1.EndpointSlice,
 	services []*corev1.Service,
 	podLabelSource PodLabelSource,
 	upstreams map[*core.ResourceRef]*kubeplugin.UpstreamSpec,
@@ -391,19 +392,23 @@ func computeGlooEndpoints(
 		}
 
 		// find each matching endpoint
-		for _, eps := range kubeEndpoints {
-			if eps.Namespace != spec.GetServiceNamespace() || eps.Name != spec.GetServiceName() {
+		for _, eps := range kubeEndpointSlices {
+			if eps.Namespace != spec.GetServiceNamespace() || eps.Labels[discoveryv1.LabelServiceName] != spec.GetServiceName() {
 				continue
 			}
-			for _, subset := range eps.Subsets {
-				port := findFirstPortInEndpointSubsets(subset, singlePortService, kubeServicePort)
-				if port == 0 {
-					warnsToLog = append(warnsToLog, fmt.Sprintf("upstream %v: port %v not found for service %v in endpoint %v", usRef.Key(), spec.GetServicePort(), spec.GetServiceName(), subset))
+			port := findFirstPortInEndpointSlice(eps, singlePortService, kubeServicePort)
+			if port == 0 {
+				warnsToLog = append(warnsToLog, fmt.Sprintf("upstream %v: port %v not found for service %v in endpoint %v", usRef.Key(), spec.GetServicePort(), spec.GetServiceName(), eps))
+				continue
+			}
+			for _, endpoint := range eps.Endpoints {
+				if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
 					continue
 				}
-
-				warnings := processSubsetAddresses(subset, spec, podLabelSource, usRef, port, endpointsMap, isHeadlessSvc)
-				warnsToLog = append(warnsToLog, warnings...)
+				warning := processEndpointAddresses(endpoint, spec, podLabelSource, usRef, port, endpointsMap, isHeadlessSvc)
+				if warning != "" {
+					warnsToLog = append(warnsToLog, warning)
+				}
 			}
 		}
 	}
@@ -413,50 +418,58 @@ func computeGlooEndpoints(
 	return endpoints, warnsToLog, errorsToLog
 }
 
-func processSubsetAddresses(subset corev1.EndpointSubset, spec *kubeplugin.UpstreamSpec, pods PodLabelSource, usRef *core.ResourceRef, port uint32, endpointsMap map[Epkey][]*core.ResourceRef, isHeadlessService bool) []string {
-	var warnings []string
-	for _, addr := range subset.Addresses {
-		var podName, podNamespace string
-		targetRef := addr.TargetRef
-		if targetRef != nil {
-			if targetRef.Kind == "Pod" {
-				podName = targetRef.Name
-				podNamespace = targetRef.Namespace
-			}
-		}
-		if len(spec.GetSelector()) != 0 {
-			// determine whether labels for the owner of this ip (pod) matches the spec
-			podLabels, err := pods.GetLabelsForIp(addr.IP, podName, podNamespace)
-			if err != nil {
-				// pod not found for IP? what's that about?
-				warnings = append(warnings, fmt.Sprintf("error for upstream %v service %v: %v", usRef.Key(), spec.GetServiceName(), err))
-				continue
-			}
-			if !labels.SelectorFromSet(spec.GetSelector()).Matches(labels.Set(podLabels)) {
-				continue
-			}
-			// pod hasn't been assigned address yet
-			if addr.IP == "" {
-				continue
-			}
-		}
-		key := Epkey{addr.IP, port, podName, podNamespace, usRef, isHeadlessService}
-		copyRef := *usRef
-		endpointsMap[key] = append(endpointsMap[key], &copyRef)
+func processEndpointAddresses(
+	endpoint discoveryv1.Endpoint,
+	spec *kubeplugin.UpstreamSpec,
+	pods PodLabelSource,
+	usRef *core.ResourceRef,
+	port uint32,
+	endpointsMap map[Epkey][]*core.ResourceRef,
+	isHeadlessService bool,
+) string {
+	var podName, podNamespace string
+	if endpoint.TargetRef != nil && endpoint.TargetRef.Kind == "Pod" {
+		podName = endpoint.TargetRef.Name
+		podNamespace = endpoint.TargetRef.Namespace
 	}
-	return warnings
+
+	addr := endpoint.Addresses[0] // https://github.com/kubernetes/kubernetes/issues/106267
+
+	if len(spec.GetSelector()) != 0 {
+		// determine whether labels for the owner of this ip (pod) matches the spec
+		podLabels, err := pods.GetLabelsForIp(addr, podName, podNamespace)
+		if err != nil {
+			// pod not found for IP? what's that about?
+			return fmt.Sprintf("error for upstream %v service %v: %v", usRef.Key(), spec.GetServiceName(), err)
+		}
+		if !labels.SelectorFromSet(spec.GetSelector()).Matches(labels.Set(podLabels)) {
+			return ""
+		}
+	}
+	key := Epkey{addr, port, podName, podNamespace, usRef, isHeadlessService}
+
+	// Several endpoint slices can have same endpoints.
+	// Check if the reference to upstream already exists for this endpoint before adding it.
+	for _, existingRef := range endpointsMap[key] {
+		if existingRef.Key() == usRef.Key() {
+			return ""
+		}
+	}
+	copyRef := *usRef
+	endpointsMap[key] = append(endpointsMap[key], &copyRef)
+	return ""
 }
 
-func findFirstPortInEndpointSubsets(subset corev1.EndpointSubset, singlePortService bool, kubeServicePort *corev1.ServicePort) uint32 {
+func findFirstPortInEndpointSlice(slice *discoveryv1.EndpointSlice, singlePortService bool, kubeServicePort *corev1.ServicePort) uint32 {
 	var port uint32
-	for _, p := range subset.Ports {
+	for _, p := range slice.Ports {
 		// if the endpoint port is not named, it implies that
 		// the kube service only has a single unnamed port as well.
 		switch {
-		case singlePortService:
-			port = uint32(p.Port)
-		case p.Name == kubeServicePort.Name:
-			port = uint32(p.Port)
+		case singlePortService && p.Port != nil:
+			port = uint32(*p.Port)
+		case p.Name != nil && p.Port != nil && *p.Name == kubeServicePort.Name:
+			port = uint32(*p.Port)
 			break
 		}
 	}

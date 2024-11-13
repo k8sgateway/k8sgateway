@@ -10,7 +10,7 @@ import (
 
 	"github.com/solo-io/solo-kit/pkg/api/v1/clients/kube/controller"
 	kubeinformers "k8s.io/client-go/informers"
-	kubelisters "k8s.io/client-go/listers/core/v1"
+	kubelisters "k8s.io/client-go/listers/discovery/v1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -19,7 +19,7 @@ import (
 //go:generate mockgen -destination ./mocks/kubesharedfactory_mock.go github.com/solo-io/gloo/projects/gloo/pkg/plugins/kubernetes KubePluginSharedFactory
 
 type KubePluginSharedFactory interface {
-	EndpointsLister(ns string) kubelisters.EndpointsLister
+	EndpointSliceLister(ns string) kubelisters.EndpointSliceLister
 	Subscribe() <-chan struct{}
 	Unsubscribe(<-chan struct{})
 }
@@ -27,7 +27,7 @@ type KubePluginSharedFactory interface {
 type KubePluginListers struct {
 	initError error
 
-	endpointsLister map[string]kubelisters.EndpointsLister
+	endpointSliceLister map[string]kubelisters.EndpointSliceLister
 
 	cacheUpdatedWatchers      []chan struct{}
 	cacheUpdatedWatchersMutex sync.Mutex
@@ -52,13 +52,13 @@ func startInformerFactory(ctx context.Context, client kubernetes.Interface, watc
 
 	var informers []cache.SharedIndexInformer
 	k := &KubePluginListers{
-		endpointsLister: map[string]kubelisters.EndpointsLister{},
+		endpointSliceLister: map[string]kubelisters.EndpointSliceLister{},
 	}
 	for _, nsToWatch := range watchNamespaces {
 		kubeInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(client, resyncDuration, kubeinformers.WithNamespace(nsToWatch))
-		endpointInformer := kubeInformerFactory.Core().V1().Endpoints()
-		informers = append(informers, endpointInformer.Informer())
-		k.endpointsLister[nsToWatch] = endpointInformer.Lister()
+		endpointSliceInformer := kubeInformerFactory.Discovery().V1().EndpointSlices()
+		informers = append(informers, endpointSliceInformer.Informer())
+		k.endpointSliceLister[nsToWatch] = endpointSliceInformer.Lister()
 	}
 
 	kubeController := controller.NewController("kube-plugin-controller",
@@ -86,8 +86,8 @@ func startInformerFactory(ctx context.Context, client kubernetes.Interface, watc
 	return k
 }
 
-func (k *KubePluginListers) EndpointsLister(ns string) kubelisters.EndpointsLister {
-	return k.endpointsLister[ns]
+func (k *KubePluginListers) EndpointSliceLister(ns string) kubelisters.EndpointSliceLister {
+	return k.endpointSliceLister[ns]
 }
 
 func (k *KubePluginListers) Subscribe() <-chan struct{} {
