@@ -2,9 +2,9 @@ ARG BASE_IMAGE
 
 
 FROM $BASE_IMAGE
-ARG GOARCH=amd64
+ARG TARGETARCH
 
-COPY certgen-linux-$GOARCH /usr/local/bin/certgen
+COPY certgen-linux-$TARGETARCH /usr/local/bin/certgen
 
 USER 10101
 

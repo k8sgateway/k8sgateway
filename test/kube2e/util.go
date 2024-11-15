@@ -38,7 +38,7 @@ const (
 func GetHttpEchoImage() string {
 	httpEchoImage := "hashicorp/http-echo"
 	if runtime.GOARCH == "arm64" {
-		httpEchoImage = "gcr.io/solo-test-236622/http-echo"
+		httpEchoImage = "us-docker.pkg.dev/developers-369321/rav-test/http-echo:0.2.4"
 	}
 	return httpEchoImage
 }

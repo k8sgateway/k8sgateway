@@ -74,6 +74,15 @@ else
 	endif
 endif
 
+LOAD_OR_PUSH := --load
+ifeq ($(MULTIARCH), true)
+	PLATFORM := --platform linux/amd64,linux/arm64
+	LOAD_OR_PUSH :=
+
+	ifeq ($(MULTIARCH_PUSH), true)
+		LOAD_OR_PUSH := --push
+	endif
+endif
 
 GOOS ?= $(shell uname -s | tr '[:upper:]' '[:lower:]')
 
@@ -515,7 +524,7 @@ $(DISTROLESS_OUTPUT_DIR)/Dockerfile: $(DISTROLESS_DIR)/Dockerfile
 
 .PHONY: distroless-docker
 distroless-docker: $(DISTROLESS_OUTPUT_DIR)/Dockerfile
-	docker buildx build --load $(PLATFORM) $(DISTROLESS_OUTPUT_DIR) -f $(DISTROLESS_OUTPUT_DIR)/Dockerfile \
+	docker buildx build $(LOAD_OR_PUSH) $(PLATFORM) $(DISTROLESS_OUTPUT_DIR) -f $(DISTROLESS_OUTPUT_DIR)/Dockerfile \
 		--build-arg PACKAGE_DONOR_IMAGE=$(PACKAGE_DONOR_IMAGE) \
 		--build-arg BASE_IMAGE=$(DISTROLESS_BASE_IMAGE) \
 		--build-arg GOARCH=$(GOARCH) \
@@ -527,7 +536,7 @@ $(DISTROLESS_OUTPUT_DIR)/Dockerfile.utils: $(DISTROLESS_DIR)/Dockerfile.utils
 
 .PHONY: distroless-with-utils-docker
 distroless-with-utils-docker: distroless-docker $(DISTROLESS_OUTPUT_DIR)/Dockerfile.utils
-	docker buildx build --load $(PLATFORM) $(DISTROLESS_OUTPUT_DIR) -f $(DISTROLESS_OUTPUT_DIR)/Dockerfile.utils \
+	docker buildx build $(LOAD_OR_PUSH) $(PLATFORM) $(DISTROLESS_OUTPUT_DIR) -f $(DISTROLESS_OUTPUT_DIR)/Dockerfile.utils \
 		--build-arg UTILS_DONOR_IMAGE=$(UTILS_DONOR_IMAGE) \
 		--build-arg BASE_IMAGE=$(GLOO_DISTROLESS_BASE_IMAGE) \
 		--build-arg GOARCH=$(GOARCH) \
@@ -819,7 +828,7 @@ $(CERTGEN_OUTPUT_DIR)/Dockerfile.certgen: $(CERTGEN_DIR)/Dockerfile
 
 .PHONY: certgen-docker
 certgen-docker: $(CERTGEN_OUTPUT_DIR)/certgen-linux-$(GOARCH) $(CERTGEN_OUTPUT_DIR)/Dockerfile.certgen
-	docker buildx build --load $(PLATFORM) $(CERTGEN_OUTPUT_DIR) -f $(CERTGEN_OUTPUT_DIR)/Dockerfile.certgen \
+	docker buildx build $(LOAD_OR_PUSH) $(PLATFORM) $(CERTGEN_OUTPUT_DIR) -f $(CERTGEN_OUTPUT_DIR)/Dockerfile.certgen \
 		--build-arg BASE_IMAGE=$(ALPINE_BASE_IMAGE) \
 		--build-arg GOARCH=$(GOARCH) \
 		-t $(IMAGE_REGISTRY)/certgen:$(VERSION) $(QUAY_EXPIRATION_LABEL)
@@ -829,7 +838,7 @@ $(CERTGEN_OUTPUT_DIR)/Dockerfile.certgen.distroless: $(CERTGEN_DIR)/Dockerfile.d
 
 .PHONY: certgen-distroless-docker
 certgen-distroless-docker: $(CERTGEN_OUTPUT_DIR)/certgen-linux-$(GOARCH) $(CERTGEN_OUTPUT_DIR)/Dockerfile.certgen.distroless distroless-docker
-	docker buildx build --load $(PLATFORM) $(CERTGEN_OUTPUT_DIR) -f $(CERTGEN_OUTPUT_DIR)/Dockerfile.certgen.distroless \
+	docker buildx build $(LOAD_OR_PUSH) $(PLATFORM) $(CERTGEN_OUTPUT_DIR) -f $(CERTGEN_OUTPUT_DIR)/Dockerfile.certgen.distroless \
 		--build-arg BASE_IMAGE=$(GLOO_DISTROLESS_BASE_IMAGE) \
 		--build-arg GOARCH=$(GOARCH) \
 		-t $(IMAGE_REGISTRY)/certgen:$(VERSION)-distroless $(QUAY_EXPIRATION_LABEL)
@@ -847,7 +856,7 @@ $(KUBECTL_OUTPUT_DIR)/Dockerfile.kubectl: $(KUBECTL_DIR)/Dockerfile
 
 .PHONY: kubectl-docker
 kubectl-docker: $(KUBECTL_OUTPUT_DIR)/Dockerfile.kubectl
-	docker buildx build --load $(PLATFORM) $(KUBECTL_OUTPUT_DIR) -f $(KUBECTL_OUTPUT_DIR)/Dockerfile.kubectl \
+	docker buildx build $(LOAD_OR_PUSH) $(PLATFORM) $(KUBECTL_OUTPUT_DIR) -f $(KUBECTL_OUTPUT_DIR)/Dockerfile.kubectl \
 		--build-arg BASE_IMAGE=$(ALPINE_BASE_IMAGE) \
 		--build-arg GOARCH=$(GOARCH) \
 		-t $(IMAGE_REGISTRY)/kubectl:$(VERSION) $(QUAY_EXPIRATION_LABEL)
@@ -858,7 +867,7 @@ $(KUBECTL_OUTPUT_DIR)/Dockerfile.kubectl.distroless: $(KUBECTL_DIR)/Dockerfile.d
 
 .PHONY: kubectl-distroless-docker
 kubectl-distroless-docker: $(KUBECTL_OUTPUT_DIR)/Dockerfile.kubectl.distroless distroless-with-utils-docker
-	docker buildx build --load $(PLATFORM) $(KUBECTL_OUTPUT_DIR) -f $(KUBECTL_OUTPUT_DIR)/Dockerfile.kubectl.distroless \
+	docker buildx build $(LOAD_OR_PUSH) $(PLATFORM) $(KUBECTL_OUTPUT_DIR) -f $(KUBECTL_OUTPUT_DIR)/Dockerfile.kubectl.distroless \
 		--build-arg BASE_IMAGE=$(GLOO_DISTROLESS_BASE_WITH_UTILS_IMAGE) \
 		--build-arg GOARCH=$(GOARCH) \
 		-t $(IMAGE_REGISTRY)/kubectl:$(VERSION)-distroless $(QUAY_EXPIRATION_LABEL)
