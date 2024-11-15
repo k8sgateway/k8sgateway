@@ -9,6 +9,7 @@ import (
 	gloo_defaults "github.com/solo-io/gloo/projects/controller/pkg/defaults"
 	"github.com/solo-io/gloo/projects/gateway/pkg/defaults"
 	"github.com/solo-io/gloo/test/kubernetes/e2e"
+	testdefaults "github.com/solo-io/gloo/test/kubernetes/e2e/defaults"
 	testutilsresources "github.com/solo-io/gloo/test/kubernetes/testutils/resources"
 	"github.com/solo-io/solo-kit/pkg/api/v1/resources"
 
@@ -33,6 +34,21 @@ type edgeGatewaySuite struct {
 	routingManifestFile string
 }
 
+// DO_NOT_SUBMIT: better like this or embeddeded like in test/kubernetes/e2e/features/http_listener_options/http_lis_opt_suite.go
+func (s *edgeGatewaySuite) Ctx() context.Context {
+	return s.ctx
+}
+
+func (s *edgeGatewaySuite) TestInstallation() *e2e.TestInstallation {
+	return s.testInstallation
+}
+
+func (s *edgeGatewaySuite) Resources() []testdefaults.Resource {
+	return []testdefaults.Resource{
+		&testdefaults.CurlPodResource{},
+	}
+}
+
 func NewEdgeGatewayHeadlessSvcSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.TestingSuite {
 	manifestFile := filepath.Join(testInst.GeneratedFiles.TempDir, EdgeGatewayApiRoutingGeneratedFileName)
 	return &edgeGatewaySuite{
@@ -55,6 +71,8 @@ func (s *edgeGatewaySuite) TestEdgeGatewayRoutingHeadlessSvc() {
 		s.NoError(err, "can delete setup manifest")
 		s.testInstallation.Assertions.EventuallyObjectsNotExist(s.ctx, headlessService)
 
+		testdefaults.DeleteResources(s)
+
 		err = s.testInstallation.Actions.Kubectl().DeleteFile(s.ctx, s.routingManifestFile)
 		s.NoError(err, "can delete setup Edge Gateway API routing manifest")
 	})
@@ -65,6 +83,8 @@ func (s *edgeGatewaySuite) TestEdgeGatewayRoutingHeadlessSvc() {
 	s.testInstallation.Assertions.EventuallyPodsRunning(s.ctx, headlessService.ObjectMeta.GetNamespace(), metav1.ListOptions{
 		LabelSelector: "app.kubernetes.io/name=nginx",
 	})
+
+	testdefaults.InstallResources(s)
 
 	err = s.testInstallation.Actions.Kubectl().ApplyFile(s.ctx, s.routingManifestFile)
 	s.NoError(err, "can setup Edge Gateway API routing manifest")
