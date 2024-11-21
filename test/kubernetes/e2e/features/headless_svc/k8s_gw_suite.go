@@ -11,6 +11,7 @@ import (
 	"github.com/solo-io/gloo/pkg/utils/kubeutils"
 	"github.com/solo-io/gloo/pkg/utils/requestutils/curl"
 	"github.com/solo-io/gloo/test/kubernetes/e2e"
+	testdefaults "github.com/solo-io/gloo/test/kubernetes/e2e/defaults"
 	"github.com/solo-io/gloo/test/kubernetes/testutils/resources"
 )
 
@@ -27,6 +28,20 @@ type k8sGatewaySuite struct {
 
 	// routingManifestFile is the file where the generated manifest files will be written for routing resources for the test suite
 	routingManifestFile string
+}
+
+func (s *k8sGatewaySuite) Ctx() context.Context {
+	return s.ctx
+}
+
+func (s *k8sGatewaySuite) TestInstallation() *e2e.TestInstallation {
+	return s.testInstallation
+}
+
+func (s *k8sGatewaySuite) Resources() []testdefaults.Resource {
+	return []testdefaults.Resource{
+		&testdefaults.CurlPodResource{},
+	}
 }
 
 func NewK8sGatewayHeadlessSvcSuite(ctx context.Context, testInst *e2e.TestInstallation) suite.TestingSuite {
@@ -53,6 +68,8 @@ func (s *k8sGatewaySuite) TestConfigureRoutingHeadlessSvc() {
 		s.NoError(err, "can delete setup manifest")
 		s.testInstallation.Assertions.EventuallyObjectsNotExist(s.ctx, headlessService)
 
+		testdefaults.DeleteResources(s)
+
 		err = s.testInstallation.Actions.Kubectl().DeleteFile(s.ctx, s.routingManifestFile)
 		s.NoError(err, "can delete setup k8s routing manifest")
 		s.testInstallation.Assertions.EventuallyObjectsNotExist(s.ctx, k8sApiProxyDeployment, k8sApiProxyService)
@@ -64,6 +81,8 @@ func (s *k8sGatewaySuite) TestConfigureRoutingHeadlessSvc() {
 	s.testInstallation.Assertions.EventuallyPodsRunning(s.ctx, headlessService.ObjectMeta.GetNamespace(), metav1.ListOptions{
 		LabelSelector: "app.kubernetes.io/name=nginx",
 	})
+
+	testdefaults.InstallResources(s)
 
 	err = s.testInstallation.Actions.Kubectl().ApplyFile(s.ctx, s.routingManifestFile)
 	s.NoError(err, "can setup k8s routing manifest")
