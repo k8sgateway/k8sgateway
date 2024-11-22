@@ -124,7 +124,14 @@ func (s *testingSuite) TestSpanNameTransformationsWithoutRouteDecorator() {
 			})),
 			curl.WithHostHeader(testHostname),
 			curl.WithPort(gatewayProxyPort),
+			// this request sometimes times out, so let's add some retries
+			// https://github.com/solo-io/gloo/actions/runs/11773028593/job/32789301648
+			// we have not experienced this in
+			// TestSpanNameTransformationsWithRouteDecorator, so leave it out
+			// from there for now
+			curl.WithRetries(3, 1, 10),
 			curl.WithPath(pathWithoutRouteDescriptor),
+			curl.Silent(),
 		},
 		&matchers.HttpResponse{
 			StatusCode: http.StatusOK,
@@ -150,6 +157,7 @@ func (s *testingSuite) TestSpanNameTransformationsWithRouteDecorator() {
 			curl.WithHostHeader("example.com"),
 			curl.WithPort(gatewayProxyPort),
 			curl.WithPath(pathWithRouteDescriptor),
+			curl.Silent(),
 		},
 		&matchers.HttpResponse{
 			StatusCode: http.StatusOK,
