@@ -29,7 +29,8 @@ type PolicyTargetRef struct {
 }
 
 type PolicyWrapper struct {
-	GK schema.GroupKind
+	ObjectSource `json:",inline"`
+
 	// Errors processing it for status.
 	// note: these errors are based on policy itself, regardless of whether it's attached to a resource.
 	// TODO: change for conditions
@@ -37,13 +38,14 @@ type PolicyWrapper struct {
 
 	// original object. ideally with structural errors removed.
 	// Opaque to us other than metadata.
-	Policy metav1.Object
+	Policy   metav1.Object
+	PolicyIr any
 
 	TargetRefs []PolicyTargetRef
 }
 
 func (c PolicyWrapper) ResourceName() string {
-	return fmt.Sprintf("%s/%s/%s/%s", c.GK.Group, c.GK.Kind, c.Policy.GetNamespace(), c.Policy.GetName())
+	return fmt.Sprintf("%s/%s/%s/%s", c.Group, c.Kind, c.Namespace, c.Name)
 }
 
 func (c PolicyWrapper) Obj() metav1.Object {
@@ -61,31 +63,49 @@ func (c PolicyWrapper) Equals(in PolicyWrapper) bool {
 	return versionEquals && c.Policy.GetUID() == in.Policy.GetUID()
 }
 
-type Policy interface {
-	Obj() metav1.Object
+type PolicyAtt struct {
+	// original object. ideally with structural errors removed.
+	// Opaque to us other than metadata.
+	PolicyIr any
+
+	PolicyTargetRef PolicyTargetRef
 }
 
-type Policies []Policy
+func (c PolicyAtt) Obj() any {
+	return c.PolicyIr
+}
+
+func (c PolicyAtt) TargetRef() PolicyTargetRef {
+	return c.PolicyTargetRef
+}
+
+type AttachedPolicy interface {
+	Obj() metav1.Object
+	TargetRef() PolicyTargetRef
+}
+
+type Policies []AttachedPolicy
 
 //type AttachedPolicies map[string]Policies
 
-type NetworkPolicy Policy
-type HttpPolicy Policy
-type UpstreamPolicy Policy
-type HttpBackendPolicy Policy
-type ListenerPolicy Policy
+type NetworkPolicy AttachedPolicy
+type HttpPolicy AttachedPolicy
+type UpstreamPolicy AttachedPolicy
+type HttpBackendPolicy AttachedPolicy
+type ListenerPolicy AttachedPolicy
 
-type AttachedPolicies[P Policy] struct {
-	Policies map[schema.GroupKind][]P
+type AttachedPolicies[P AttachedPolicy] struct {
+	Policies map[schema.GroupKind][]PolicyAtt
 }
 
 type Backend struct {
 	ClusterName string
-	Port        uint32
 	Weight      uint32
 
 	// upstream could be nil if not found or no ref grant
-	Upstream Upstream
+	Upstream *Upstream
+	// if nil, error might say why
+	Err error
 }
 
 /*
@@ -125,6 +145,7 @@ type HttpBackend struct {
 }
 
 type HttpRouteIR struct {
+	ObjectSource     `json:",inline"`
 	SourceObject     client.Object
 	ParentRefs       []gwv1.ParentReference
 	Hostnames        []string
@@ -132,36 +153,36 @@ type HttpRouteIR struct {
 	Rules            []HttpRouteRuleIR
 }
 
-type HttpRouteRuleIR struct {
-	gwv1.HTTPRouteRule
-	Parent           HttpRouteIR
-	ExtensionRefs    AttachedPolicies[HttpPolicy]
-	AttachedPolicies AttachedPolicies[HttpPolicy]
-
-	Backends []HttpBackend
-}
+// type HttpRouteRuleIR struct {
+// 	gwv1.HTTPRouteRule
+// 	Parent           HttpRouteIR
+// 	ExtensionRefs    AttachedPolicies[HttpPolicy]
+// 	AttachedPolicies AttachedPolicies[HttpPolicy]
+//
+// 	Backends []HttpBackend
+// }
 
 // TODO: this is the structure we probably want,
 // and maybe change name -- it's not a Rule, it's a Match
-// type HttpRouteRuleIR struct {
-// 	Parent     *HttpRouteIR
-// 	SourceRule *gwv1.HTTPRouteRule
-
-// 	Name             string
-// 	Match            gwv1.HTTPRouteMatch
-// 	ExtensionRefs    AttachedPolicies[HttpPolicy]
-// 	AttachedPolicies AttachedPolicies[HttpPolicy]
-// 	Backends      []HttpBackend
-// }
+type HttpRouteRuleIR struct {
+	Match            gwv1.HTTPRouteMatch
+	MatchIndex       int
+	Parent           *HttpRouteIR
+	SourceRule       *gwv1.HTTPRouteRule
+	Name             string
+	ExtensionRefs    AttachedPolicies[HttpPolicy]
+	AttachedPolicies AttachedPolicies[HttpPolicy]
+	Backends         []HttpBackend
+}
 
 // TODO: temporary structure to represent an individual Match (equiv. to gloov1.Route)
 // need to remove in favor of commented out HttpRouteRuleIR above
-type HttpRouteRuleMatchIR struct {
-	Match    gwv1.HTTPRouteMatch
-	Name     string // not sure if we actually need this anymore
-	Parent   HttpRouteRuleIR
-	Backends []HttpBackend
-}
+//type HttpRouteRuleMatchIR struct {
+//	Match    gwv1.HTTPRouteMatch
+//	Name     string // not sure if we actually need this anymore
+//	Parent   HttpRouteRuleIR
+//	Backends []HttpBackend
+//}
 
 type ListenerIR struct {
 	Name             string
@@ -219,8 +240,16 @@ type TcpIR struct {
 }
 
 // this is 1:1 with envoy deployments
+// not in a collection so doesn't need a krt interfaces.
 type GatewayIR struct {
 	Listeners    []ListenerIR
+	SourceObject *gwv1.Gateway
+
+	AttachedPolicies     AttachedPolicies[ListenerPolicy]
+	AttachedHttpPolicies AttachedPolicies[HttpPolicy]
+}
+
+type GatewayWithPoliciesIR struct {
 	SourceObject *gwv1.Gateway
 
 	AttachedPolicies     AttachedPolicies[ListenerPolicy]

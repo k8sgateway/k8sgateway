@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"maps"
 	"regexp"
-	"slices"
 
 	envoy_config_route_v3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	envoy_type_matcher_v3 "github.com/envoyproxy/go-control-plane/envoy/type/matcher/v3"
@@ -74,8 +73,10 @@ func (h *httpRouteConfigurationTranslator) computeVirtualHost(
 	for i, route := range virtualHost.Rules {
 		routeReport := h.reporter.Route(route.Parent.SourceObject).ParentRef(&h.parentRef)
 		generatedName := fmt.Sprintf("%s-route-%d", virtualHost.Name, i)
-		computedRoutes := h.envoyRoutes(ctx, virtualHost, routeReport, route, generatedName)
-		envoyRoutes = append(envoyRoutes, computedRoutes...)
+		computedRoute := h.envoyRoutes(ctx, virtualHost, routeReport, route, generatedName)
+		if computedRoute != nil {
+			envoyRoutes = append(envoyRoutes, computedRoute)
+		}
 	}
 	domains := virtualHost.Hostnames
 	if len(domains) == 0 || (len(domains) == 1 && domains[0] == "") {
@@ -104,7 +105,7 @@ func (h *httpRouteConfigurationTranslator) computeVirtualHost(
 		}
 		for _, pol := range pols {
 			pctx := &extensions.VirtualHostContext{
-				Policy: pol.Obj(),
+				Policy: pol,
 			}
 			pass.ApplyVhostPlugin(ctx, pctx, out)
 			// TODO: check return value, if error returned, log error and report condition
@@ -119,35 +120,33 @@ func (h *httpRouteConfigurationTranslator) envoyRoutes(ctx context.Context,
 	routeReport reports.ParentRefReporter,
 	in model.HttpRouteRuleIR,
 	generatedName string,
-) []*envoy_config_route_v3.Route {
+) *envoy_config_route_v3.Route {
 
 	out := h.initRoutes(virtualHost, in, routeReport, generatedName)
 
-	for i := range out {
-		if len(in.BackendRefs) > 0 {
-			out[i].Action = h.translateRouteAction(in, out[i])
-		}
-		// run plugins here that may set actoin
-		err := h.runRoutePlugins(ctx, routeReport, in, out[i])
+	if len(in.Backends) > 0 {
+		out.Action = h.translateRouteAction(in, out)
+	}
+	// run plugins here that may set actoin
+	err := h.runRoutePlugins(ctx, routeReport, in, out)
 
-		if err == nil {
-			err = validateEnvoyRoute(out[i])
-		}
-		if err != nil {
-			contextutils.LoggerFrom(ctx).Desugar().Debug("invalid route", zap.Error(err))
-			// TODO: we may want to aggregate all these errors per http route object and report one message?
-			routeReport.SetCondition(reports.RouteCondition{
-				Type:   gwv1.RouteConditionPartiallyInvalid,
-				Status: metav1.ConditionTrue,
-				Reason: gwv1.RouteConditionReason(err.Error()),
-				// The message for this condition MUST start with the prefix "Dropped Rule"
-				Message: fmt.Sprintf("Dropped Rule: %v", err),
-			})
-			out[i] = nil
-		}
+	if err == nil {
+		err = validateEnvoyRoute(out)
+	}
+	if err != nil {
+		contextutils.LoggerFrom(ctx).Desugar().Debug("invalid route", zap.Error(err))
+		// TODO: we may want to aggregate all these errors per http route object and report one message?
+		routeReport.SetCondition(reports.RouteCondition{
+			Type:   gwv1.RouteConditionPartiallyInvalid,
+			Status: metav1.ConditionTrue,
+			Reason: gwv1.RouteConditionReason(err.Error()),
+			// The message for this condition MUST start with the prefix "Dropped Rule"
+			Message: fmt.Sprintf("Dropped Rule: %v", err),
+		})
+		out = nil
 	}
 
-	return slices.DeleteFunc(out, func(e *envoy_config_route_v3.Route) bool { return e == nil })
+	return out
 }
 
 func (h *httpRouteConfigurationTranslator) runVostPlugins(ctx context.Context, out *envoy_config_route_v3.VirtualHost) {
@@ -164,7 +163,7 @@ func (h *httpRouteConfigurationTranslator) runVostPlugins(ctx context.Context, o
 			}
 			for _, pol := range pols {
 				pctx := &extensions.VirtualHostContext{
-					Policy: pol.Obj(),
+					Policy: pol,
 				}
 				pass.ApplyVhostPlugin(ctx, pctx, out)
 				// TODO: check return value, if error returned, log error and report condition
@@ -194,7 +193,7 @@ func (h *httpRouteConfigurationTranslator) runRoutePlugins(ctx context.Context, 
 			}
 			for _, pol := range pols {
 				pctx := &extensions.RouteContext{
-					Policy:   pol.Obj(),
+					Policy:   pol,
 					Reporter: routeReport,
 				}
 				err := pass.ApplyForRoute(ctx, pctx, out)
@@ -218,7 +217,7 @@ func (h *httpRouteConfigurationTranslator) runBackendPolicies(ctx context.Contex
 		}
 		for _, pol := range pols {
 
-			err := pass.ApplyForRouteBackend(ctx, pCtx, pol.Obj())
+			err := pass.ApplyForRouteBackend(ctx, pCtx, pol)
 			if err != nil {
 				errs = append(errs, err)
 			}
@@ -336,30 +335,26 @@ func (h *httpRouteConfigurationTranslator) initRoutes(
 	in model.HttpRouteRuleIR,
 	routeReport reports.ParentRefReporter,
 	generatedName string,
-) []*envoy_config_route_v3.Route {
+) *envoy_config_route_v3.Route {
 
-	if len(in.Matches) == 0 {
-		return []*envoy_config_route_v3.Route{
-			{
-				Match: &envoy_config_route_v3.RouteMatch{
-					PathSpecifier: &envoy_config_route_v3.RouteMatch_Prefix{Prefix: "/"},
-				},
-			},
-		}
+	//	if len(in.Matches) == 0 {
+	//		return []*envoy_config_route_v3.Route{
+	//			{
+	//				Match: &envoy_config_route_v3.RouteMatch{
+	//					PathSpecifier: &envoy_config_route_v3.RouteMatch_Prefix{Prefix: "/"},
+	//				},
+	//			},
+	//		}
+	//	}
+
+	out := &envoy_config_route_v3.Route{
+		Match: translateGlooMatcher(in.Match),
 	}
-
-	out := make([]*envoy_config_route_v3.Route, len(in.Matches))
-	for i, matcher := range in.Matches {
-
-		out[i] = &envoy_config_route_v3.Route{
-			Match: translateGlooMatcher(matcher),
-		}
-		name := defaultStr(in.Name)
-		if name != "" {
-			out[i].Name = fmt.Sprintf("%s-%s-matcher-%d", generatedName, name, i)
-		} else {
-			out[i].Name = fmt.Sprintf("%s-matcher-%d", generatedName, i)
-		}
+	name := in.Name
+	if name != "" {
+		out.Name = fmt.Sprintf("%s-%s-matcher-%d", generatedName, name, in.MatchIndex)
+	} else {
+		out.Name = fmt.Sprintf("%s-matcher-%d", generatedName, in.MatchIndex)
 	}
 
 	return out

@@ -5,6 +5,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/gateway-api/apis/v1alpha2"
+	gw1alpha2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 )
 
 // +kubebuilder:object:root=true
@@ -28,7 +29,8 @@ type RoutePolicyList struct {
 }
 
 type RoutePolicySpec struct {
-	Timeout int `json:"timeout,omitempty"`
+	TargetRef gw1alpha2.LocalPolicyTargetReference
+	Timeout   int `json:"timeout,omitempty"`
 }
 
 type PolicyStatus struct {

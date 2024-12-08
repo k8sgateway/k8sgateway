@@ -12,18 +12,17 @@ import (
 	"github.com/solo-io/gloo/projects/gateway2/reports"
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	"istio.io/istio/pkg/kube/krt"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
 type ListenerContext struct{}
 type VirtualHostContext struct {
-	Policy metav1.Object
+	Policy model.PolicyAtt
 }
 type RouteBackendContext struct {
 	FilterChainName string
-	Upstream        model.Upstream
+	Upstream        *model.Upstream
 	// todo: make this not public
 	TypedFiledConfig *map[string]*anypb.Any
 }
@@ -36,7 +35,7 @@ func (r *RouteBackendContext) AddTypedConfig(key string, v *anypb.Any) {
 }
 
 type RouteContext struct {
-	Policy   metav1.Object
+	Policy   model.PolicyAtt
 	Reporter reports.ParentRefReporter
 }
 
@@ -62,7 +61,7 @@ type ProxyTranslationPass interface {
 	ApplyForRouteBackend(
 		ctx context.Context,
 		pCtx *RouteBackendContext,
-		policy metav1.Object,
+		policy model.PolicyAtt,
 	) error
 	// called 1 time per listener
 	// if a plugin emits new filters, they must be with a plugin unique name.
@@ -84,9 +83,9 @@ type GwTranslationCtx struct{}
 type PolicyImpl struct {
 	AttachmentPoints          []model.AttachmentPoints
 	NewGatewayTranslationPass func(ctx context.Context, tctx GwTranslationCtx) ProxyTranslationPass
-	Policies                  krt.Collection[model.Policy]
-	PoliciesFetch             func(n, ns string) model.Policy
-	ProcessUpstream           func(ctx context.Context, policy metav1.Object, in model.Upstream, out *envoy_config_cluster_v3.Cluster)
+	Policies                  krt.Collection[model.PolicyWrapper]
+	PoliciesFetch             func(n, ns string) model.PolicyWrapper
+	ProcessUpstream           func(ctx context.Context, policy model.PolicyAtt, in model.Upstream, out *envoy_config_cluster_v3.Cluster)
 }
 type UpstreamImpl struct {
 	ProcessUpstream func(ctx context.Context, in model.Upstream, out *envoy_config_cluster_v3.Cluster)

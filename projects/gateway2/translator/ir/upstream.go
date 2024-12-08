@@ -52,7 +52,7 @@ func (t *UpstreamTranslator) runPlugins(ctx context.Context, u model.Upstream, o
 			continue
 		}
 		for _, pol := range u.AttachedPolicies.Policies[gk] {
-			polImpl.ProcessUpstream(ctx, pol.Obj(), u, out)
+			polImpl.ProcessUpstream(ctx, pol, u, out)
 		}
 	}
 }

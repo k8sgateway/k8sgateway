@@ -1,29 +1,27 @@
-package directresponse
+package routeoptions
 
 import (
 	"context"
 	"fmt"
-	"net/http"
+	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 
-	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	envoy_config_listener_v3 "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	envoy_config_route_v3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	"github.com/solo-io/gloo/projects/controller/pkg/plugins"
 	"github.com/solo-io/gloo/projects/gateway2/api/v1alpha1"
 	extensions "github.com/solo-io/gloo/projects/gateway2/extensions2"
 	"github.com/solo-io/gloo/projects/gateway2/model"
-	"github.com/solo-io/gloo/projects/gateway2/reports"
 	"github.com/solo-io/go-utils/contextutils"
 	"istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/kube/kclient"
 	"istio.io/istio/pkg/kube/krt"
 	"istio.io/istio/pkg/kube/kubetypes"
+	gw1alpha2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 )
 
 type plugin2 struct {
@@ -31,14 +29,14 @@ type plugin2 struct {
 
 func NewPlugin2(ctx context.Context, istioClient kube.Client, dbg *krt.DebugHandler) *extensions.Plugin {
 
-	col := SetupCollectionDynamic[v1alpha1.DirectResponse](
+	col := SetupCollectionDynamic[v1alpha1.RoutePolicy](
 		ctx,
 		istioClient,
-		v1alpha1.GroupVersion.WithResource("directresponses"),
-		krt.WithName("DirectResponse"), krt.WithDebugging(dbg),
+		v1alpha1.GroupVersion.WithResource("routepolicies"),
+		krt.WithName("RoutePolicy"), krt.WithDebugging(dbg),
 	)
-	gk := v1alpha1.DirectResponseGVK.GroupKind()
-	policyCol := krt.NewCollection(col, func(krtctx krt.HandlerContext, i *v1alpha1.DirectResponse) *model.PolicyWrapper {
+	gk := v1alpha1.RoutePolicyGVK.GroupKind()
+	policyCol := krt.NewCollection(col, func(krtctx krt.HandlerContext, i *v1alpha1.RoutePolicy) *model.PolicyWrapper {
 		var pol = &model.PolicyWrapper{
 			ObjectSource: model.ObjectSource{
 				Group:     gk.Group,
@@ -46,16 +44,16 @@ func NewPlugin2(ctx context.Context, istioClient kube.Client, dbg *krt.DebugHand
 				Namespace: i.Namespace,
 				Name:      i.Name,
 			},
-			Policy:   i,
-			PolicyIr: i,
-			// no target refs for direct response
+			Policy:     i,
+			PolicyIr:   i,
+			TargetRefs: convert(i.Spec.TargetRef),
 		}
 		return pol
 	})
 
 	return &extensions.Plugin{
 		ContributesPolicies: map[schema.GroupKind]extensions.PolicyImpl{
-			v1alpha1.DirectResponseGVK.GroupKind(): {
+			v1alpha1.RoutePolicyGVK.GroupKind(): {
 				AttachmentPoints:          []model.AttachmentPoints{model.HttpAttachmentPoint},
 				NewGatewayTranslationPass: newPlug,
 				Policies:                  policyCol,
@@ -64,12 +62,20 @@ func NewPlugin2(ctx context.Context, istioClient kube.Client, dbg *krt.DebugHand
 	}
 }
 
+func convert(targetRef gw1alpha2.LocalPolicyTargetReference) []model.PolicyTargetRef {
+	return []model.PolicyTargetRef{{
+		Kind:  string(targetRef.Kind),
+		Name:  string(targetRef.Name),
+		Group: string(targetRef.Group),
+	}}
+}
+
 func newPlug(ctx context.Context, tctx extensions.GwTranslationCtx) extensions.ProxyTranslationPass {
 	return &plugin2{}
 }
 
 func (p *plugin2) Name() string {
-	return "directresponse"
+	return "routepolicies"
 }
 
 // called 1 time for each listener
@@ -81,44 +87,15 @@ func (p *plugin2) ApplyVhostPlugin(ctx context.Context, pCtx *extensions.Virtual
 
 // called 0 or more times
 func (p *plugin2) ApplyForRoute(ctx context.Context, pCtx *extensions.RouteContext, outputRoute *envoy_config_route_v3.Route) error {
-	dr, ok := pCtx.Policy.PolicyIr.(*v1alpha1.DirectResponse)
+	dr, ok := pCtx.Policy.PolicyIr.(*v1alpha1.RoutePolicy)
 	if !ok {
-		return fmt.Errorf("internal error: policy is not a DirectResponse")
+		return fmt.Errorf("internal error: policy is not a RoutePolicy")
 	}
 
-	// TODO: if we want to validate that only one applies, the context can contain all attached policies of
-	// this GK.
-
-	// at this point, we have a valid DR reference that we should apply to the route.
-	if outputRoute.GetAction() != nil {
-		// the output route already has an action, which is incompatible with the DirectResponse,
-		// so we'll return an error. note: the direct response plugin runs after other route plugins
-		// that modify the output route (e.g. the redirect plugin), so this should be a rare case.
-		errMsg := fmt.Sprintf("DirectResponse cannot be applied to route with existing action: %T", outputRoute.GetAction())
-		pCtx.Reporter.SetCondition(reports.RouteCondition{
-			Type:    gwv1.RouteConditionAccepted,
-			Status:  metav1.ConditionFalse,
-			Reason:  gwv1.RouteReasonIncompatibleFilters,
-			Message: errMsg,
-		})
-		outputRoute.Action = &envoy_config_route_v3.Route_DirectResponse{
-			DirectResponse: &envoy_config_route_v3.DirectResponseAction{
-				Status: http.StatusInternalServerError,
-			},
-		}
-		return fmt.Errorf(errMsg)
+	if dr.Spec.Timeout > 0 && outputRoute.GetRoute() != nil {
+		outputRoute.GetRoute().Timeout = durationpb.New(time.Second * time.Duration(dr.Spec.Timeout))
 	}
 
-	outputRoute.Action = &envoy_config_route_v3.Route_DirectResponse{
-		DirectResponse: &envoy_config_route_v3.DirectResponseAction{
-			Status: dr.GetStatusCode(),
-			Body: &corev3.DataSource{
-				Specifier: &corev3.DataSource_InlineString{
-					InlineString: dr.GetBody(),
-				},
-			},
-		},
-	}
 	return nil
 }
 

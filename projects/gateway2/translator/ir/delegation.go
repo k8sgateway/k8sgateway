@@ -22,7 +22,7 @@ func flattenDelegatedRoutes(
 	parent *RouteInfo,
 	backendRef gwv1.HTTPBackendRef,
 	parentMatch gwv1.HTTPRouteMatch,
-	outputs *[]*model.HttpRouteRuleMatchIR,
+	outputs *[]*model.HttpRouteRuleIR,
 	routesVisited sets.Set[types.NamespacedName],
 	delegationChain *list.List,
 ) error {

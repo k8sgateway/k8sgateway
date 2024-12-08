@@ -14,6 +14,7 @@ const (
 	// DirectResponseKind is the kind for the DirectResponse CRD.
 	DirectResponseKind = "DirectResponse"
 	UpstreamKind       = "Upstream"
+	RoutePolicyKind    = "RoutePolicy"
 )
 
 var (
@@ -41,5 +42,10 @@ var (
 		Group:   Group,
 		Version: Version,
 		Kind:    UpstreamKind,
+	}
+	RoutePolicyGVK = schema.GroupVersionKind{
+		Group:   Group,
+		Version: Version,
+		Kind:    RoutePolicyKind,
 	}
 )

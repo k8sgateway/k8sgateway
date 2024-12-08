@@ -3,21 +3,16 @@ package upstream
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"maps"
-	"net/http"
 
 	awspb "github.com/solo-io/gloo/projects/controller/pkg/api/external/envoy/extensions/aws"
 	"github.com/solo-io/go-utils/contextutils"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	envoy_config_cluster_v3 "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
-	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	envoy_config_listener_v3 "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	envoy_config_route_v3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	"github.com/solo-io/gloo/projects/controller/pkg/plugins"
@@ -25,7 +20,6 @@ import (
 	extensions "github.com/solo-io/gloo/projects/gateway2/extensions2"
 	"github.com/solo-io/gloo/projects/gateway2/krtcollections"
 	"github.com/solo-io/gloo/projects/gateway2/model"
-	"github.com/solo-io/gloo/projects/gateway2/reports"
 	"istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/kube/kclient"
 	"istio.io/istio/pkg/kube/krt"
@@ -50,9 +44,6 @@ var (
 )
 
 type UpstreamDestination struct {
-	metav1.TypeMeta
-	metav1.ObjectMeta
-
 	FunctionName string
 }
 type UpstreamIr struct {
@@ -122,14 +113,10 @@ func NewPlugin2(ctx context.Context, istioClient kube.Client, secrets krt.Collec
 		ContributesPolicies: map[schema.GroupKind]extensions.PolicyImpl{
 			ParameterGK: {
 				AttachmentPoints: []model.AttachmentPoints{model.HttpBackendRefAttachmentPoint},
-				PoliciesFetch: func(n, ns string) model.Policy {
+				PoliciesFetch: func(n, ns string) model.PolicyWrapper {
 					// virtual policy - we don't have a real policy object
 					return model.PolicyWrapper{
-						Policy: &UpstreamDestination{
-							ObjectMeta: metav1.ObjectMeta{
-								Namespace: ns,
-								Name:      n,
-							},
+						PolicyIr: &UpstreamDestination{
 							FunctionName: n,
 						},
 					}
@@ -204,7 +191,7 @@ func newPlug(ctx context.Context, tctx extensions.GwTranslationCtx) extensions.P
 }
 
 func (p *plugin2) Name() string {
-	return "directresponse"
+	return "upstream"
 }
 
 // called 1 time for each listener
@@ -216,53 +203,16 @@ func (p *plugin2) ApplyVhostPlugin(ctx context.Context, pCtx *extensions.Virtual
 
 // called 0 or more times
 func (p *plugin2) ApplyForRoute(ctx context.Context, pCtx *extensions.RouteContext, outputRoute *envoy_config_route_v3.Route) error {
-	dr, ok := pCtx.Policy.(*v1alpha1.DirectResponse)
-	if !ok {
-		return fmt.Errorf("internal error: policy is not a DirectResponse")
-	}
 
-	// TODO: if we want to validate that only one applies, the context can contain all attached policies of
-	// this GK.
-
-	// at this point, we have a valid DR reference that we should apply to the route.
-	if outputRoute.GetAction() != nil {
-		// the output route already has an action, which is incompatible with the DirectResponse,
-		// so we'll return an error. note: the direct response plugin runs after other route plugins
-		// that modify the output route (e.g. the redirect plugin), so this should be a rare case.
-		errMsg := fmt.Sprintf("DirectResponse cannot be applied to route with existing action: %T", outputRoute.GetAction())
-		pCtx.Reporter.SetCondition(reports.RouteCondition{
-			Type:    gwv1.RouteConditionAccepted,
-			Status:  metav1.ConditionFalse,
-			Reason:  gwv1.RouteReasonIncompatibleFilters,
-			Message: errMsg,
-		})
-		outputRoute.Action = &envoy_config_route_v3.Route_DirectResponse{
-			DirectResponse: &envoy_config_route_v3.DirectResponseAction{
-				Status: http.StatusInternalServerError,
-			},
-		}
-		return fmt.Errorf(errMsg)
-	}
-
-	outputRoute.Action = &envoy_config_route_v3.Route_DirectResponse{
-		DirectResponse: &envoy_config_route_v3.DirectResponseAction{
-			Status: dr.GetStatusCode(),
-			Body: &corev3.DataSource{
-				Specifier: &corev3.DataSource_InlineString{
-					InlineString: dr.GetBody(),
-				},
-			},
-		},
-	}
 	return nil
 }
 
 func (p *plugin2) ApplyForRouteBackend(
 	ctx context.Context,
 	pCtx *extensions.RouteBackendContext,
-	policy metav1.Object,
+	policy model.PolicyAtt,
 ) error {
-	pol, ok := policy.(*UpstreamDestination)
+	pol, ok := policy.PolicyIr.(*UpstreamDestination)
 	if !ok {
 		return nil
 		// todo: should we return fmt.Errorf("internal error: policy is not a UpstreamDestination")
