@@ -1,0 +1,7 @@
+changelog:
+  - type: FIX
+    issueLink: https://github.com/solo-io/gloo/issues/9736
+    resolvesIssue: false
+    description: >-
+      Check curl pod is running before starting tests
+
