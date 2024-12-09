@@ -2,7 +2,6 @@ package routeoptions
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -14,7 +13,7 @@ import (
 	envoy_config_route_v3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	"github.com/solo-io/gloo/projects/controller/pkg/plugins"
 	"github.com/solo-io/gloo/projects/gateway2/api/v1alpha1"
-	extensions "github.com/solo-io/gloo/projects/gateway2/extensions2"
+	extensionplug "github.com/solo-io/gloo/projects/gateway2/extensions2/plugin"
 	"github.com/solo-io/gloo/projects/gateway2/model"
 	"github.com/solo-io/go-utils/contextutils"
 	"istio.io/istio/pkg/kube"
@@ -24,10 +23,14 @@ import (
 	gw1alpha2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 )
 
-type plugin2 struct {
+type routeOptsPlugin struct {
+	spec v1alpha1.RoutePolicySpec
+}
+type routeOptsPluginGwPass struct {
+	dr *routeOptsPlugin
 }
 
-func NewPlugin2(ctx context.Context, istioClient kube.Client, dbg *krt.DebugHandler) *extensions.Plugin {
+func NewPlugin2(ctx context.Context, istioClient kube.Client, dbg *krt.DebugHandler) *extensionplug.Plugin {
 
 	col := SetupCollectionDynamic[v1alpha1.RoutePolicy](
 		ctx,
@@ -45,18 +48,18 @@ func NewPlugin2(ctx context.Context, istioClient kube.Client, dbg *krt.DebugHand
 				Name:      i.Name,
 			},
 			Policy:     i,
-			PolicyIr:   i,
+			PolicyIR:   &routeOptsPlugin{spec: i.Spec},
 			TargetRefs: convert(i.Spec.TargetRef),
 		}
 		return pol
 	})
 
-	return &extensions.Plugin{
-		ContributesPolicies: map[schema.GroupKind]extensions.PolicyImpl{
+	return &extensionplug.Plugin{
+		ContributesPolicies: map[schema.GroupKind]model.PolicyImpl{
 			v1alpha1.RoutePolicyGVK.GroupKind(): {
-				AttachmentPoints:          []model.AttachmentPoints{model.HttpAttachmentPoint},
-				NewGatewayTranslationPass: newPlug,
-				Policies:                  policyCol,
+				AttachmentPoints: []model.AttachmentPoints{model.HttpAttachmentPoint},
+				//NewGatewayTranslationPass: newPlug,
+				Policies: policyCol,
 			},
 		},
 	}
@@ -70,39 +73,34 @@ func convert(targetRef gw1alpha2.LocalPolicyTargetReference) []model.PolicyTarge
 	}}
 }
 
-func newPlug(ctx context.Context, tctx extensions.GwTranslationCtx) extensions.ProxyTranslationPass {
-	return &plugin2{}
+func (d *routeOptsPlugin) NewGatewayTranslationPass(ctx context.Context, tctx model.GwTranslationCtx) model.ProxyTranslationPass {
+	return &routeOptsPluginGwPass{dr: d}
 }
-
-func (p *plugin2) Name() string {
+func (p *routeOptsPlugin) Name() string {
 	return "routepolicies"
 }
 
 // called 1 time for each listener
-func (p *plugin2) ApplyListenerPlugin(ctx context.Context, pCtx *extensions.ListenerContext, out *envoy_config_listener_v3.Listener) {
+func (p *routeOptsPluginGwPass) ApplyListenerPlugin(ctx context.Context, pCtx *model.ListenerContext, out *envoy_config_listener_v3.Listener) {
 }
 
-func (p *plugin2) ApplyVhostPlugin(ctx context.Context, pCtx *extensions.VirtualHostContext, out *envoy_config_route_v3.VirtualHost) {
+func (p *routeOptsPluginGwPass) ApplyVhostPlugin(ctx context.Context, pCtx *model.VirtualHostContext, out *envoy_config_route_v3.VirtualHost) {
 }
 
 // called 0 or more times
-func (p *plugin2) ApplyForRoute(ctx context.Context, pCtx *extensions.RouteContext, outputRoute *envoy_config_route_v3.Route) error {
-	dr, ok := pCtx.Policy.PolicyIr.(*v1alpha1.RoutePolicy)
-	if !ok {
-		return fmt.Errorf("internal error: policy is not a RoutePolicy")
-	}
+func (p *routeOptsPluginGwPass) ApplyForRoute(ctx context.Context, pCtx *model.RouteContext, outputRoute *envoy_config_route_v3.Route) error {
 
-	if dr.Spec.Timeout > 0 && outputRoute.GetRoute() != nil {
-		outputRoute.GetRoute().Timeout = durationpb.New(time.Second * time.Duration(dr.Spec.Timeout))
+	if p.dr.spec.Timeout > 0 && outputRoute.GetRoute() != nil {
+		outputRoute.GetRoute().Timeout = durationpb.New(time.Second * time.Duration(p.dr.spec.Timeout))
 	}
 
 	return nil
 }
 
-func (p *plugin2) ApplyForRouteBackend(
+func (p *routeOptsPluginGwPass) ApplyForRouteBackend(
 	ctx context.Context,
-	pCtx *extensions.RouteBackendContext,
-	policy model.PolicyAtt,
+	policy model.PolicyIR,
+	pCtx *model.RouteBackendContext,
 ) error {
 	return nil
 }
@@ -110,21 +108,21 @@ func (p *plugin2) ApplyForRouteBackend(
 // called 1 time per listener
 // if a plugin emits new filters, they must be with a plugin unique name.
 // any filter returned from route config must be disabled, so it doesnt impact other routes.
-func (p *plugin2) HttpFilters(ctx context.Context, fcc model.FilterChainCommon) ([]plugins.StagedHttpFilter, error) {
+func (p *routeOptsPluginGwPass) HttpFilters(ctx context.Context, fcc model.FilterChainCommon) ([]plugins.StagedHttpFilter, error) {
 	return nil, nil
 }
 
-func (p *plugin2) UpstreamHttpFilters(ctx context.Context) ([]plugins.StagedUpstreamHttpFilter, error) {
+func (p *routeOptsPluginGwPass) UpstreamHttpFilters(ctx context.Context) ([]plugins.StagedUpstreamHttpFilter, error) {
 	return nil, nil
 }
 
-func (p *plugin2) NetworkFilters(ctx context.Context) ([]plugins.StagedNetworkFilter, error) {
+func (p *routeOptsPluginGwPass) NetworkFilters(ctx context.Context) ([]plugins.StagedNetworkFilter, error) {
 	return nil, nil
 }
 
 // called 1 time (per envoy proxy). replaces GeneratedResources
-func (p *plugin2) ResourcesToAdd(ctx context.Context) extensions.Resources {
-	return extensions.Resources{}
+func (p *routeOptsPluginGwPass) ResourcesToAdd(ctx context.Context) model.Resources {
+	return model.Resources{}
 }
 
 // SetupCollectionDynamic uses the dynamic client to setup an informer for a resource

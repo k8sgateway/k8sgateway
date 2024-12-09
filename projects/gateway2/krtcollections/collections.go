@@ -180,7 +180,7 @@ func (h *HttpRoutesIndex) transformRules(kctx krt.HandlerContext, src model.Obje
 		}
 
 		extensionRefs := h.getExtensionRefs(kctx, src.Namespace, r)
-		var policies model.AttachedPolicies[model.HttpPolicy]
+		var policies model.AttachedPolicies
 		if r.Name != nil {
 			policies = toAttachedPolicies(h.policies.GetTargetingPolicies(kctx, src, string(*r.Name)))
 		}
@@ -200,8 +200,8 @@ func (h *HttpRoutesIndex) transformRules(kctx krt.HandlerContext, src model.Obje
 	return rules
 
 }
-func (h *HttpRoutesIndex) getExtensionRefs(kctx krt.HandlerContext, ns string, r gwv1.HTTPRouteRule) model.AttachedPolicies[model.HttpPolicy] {
-	ret := model.AttachedPolicies[model.HttpPolicy]{
+func (h *HttpRoutesIndex) getExtensionRefs(kctx krt.HandlerContext, ns string, r gwv1.HTTPRouteRule) model.AttachedPolicies {
+	ret := model.AttachedPolicies{
 		Policies: map[schema.GroupKind][]model.PolicyAtt{},
 	}
 	for _, ext := range r.Filters {
@@ -221,14 +221,14 @@ func (h *HttpRoutesIndex) getExtensionRefs(kctx krt.HandlerContext, ns string, r
 		}
 		policy := h.policies.FetchPolicy(kctx, key)
 		if policy != nil {
-			ret.Policies[gk] = append(ret.Policies[gk], model.PolicyAtt{PolicyIr: policy.PolicyIr /*direct attachment - no target ref*/})
+			ret.Policies[gk] = append(ret.Policies[gk], model.PolicyAtt{PolicyIr: policy /*direct attachment - no target ref*/})
 		}
 
 	}
 	return ret
 }
-func (h *HttpRoutesIndex) getExtensionRefs2(kctx krt.HandlerContext, ns string, r []gwv1.HTTPRouteFilter) model.AttachedPolicies[model.HttpBackendPolicy] {
-	ret := model.AttachedPolicies[model.HttpBackendPolicy]{
+func (h *HttpRoutesIndex) getExtensionRefs2(kctx krt.HandlerContext, ns string, r []gwv1.HTTPRouteFilter) model.AttachedPolicies {
+	ret := model.AttachedPolicies{
 		Policies: map[schema.GroupKind][]model.PolicyAtt{},
 	}
 	for _, ext := range r {
@@ -249,7 +249,7 @@ func (h *HttpRoutesIndex) getExtensionRefs2(kctx krt.HandlerContext, ns string, 
 		}
 		policy := h.policies.FetchPolicy(kctx, key)
 		if policy != nil {
-			ret.Policies[gk] = append(ret.Policies[gk], model.PolicyAtt{PolicyIr: policy.PolicyIr /*direct attachment - no target ref*/})
+			ret.Policies[gk] = append(ret.Policies[gk], model.PolicyAtt{PolicyIr: policy /*direct attachment - no target ref*/})
 		}
 
 	}
@@ -341,8 +341,8 @@ func weight(w *int32) uint32 {
 	return uint32(*w)
 }
 
-func toAttachedPolicies(policies []model.PolicyWrapper) model.AttachedPolicies[model.HttpPolicy] {
-	ret := model.AttachedPolicies[model.HttpPolicy]{
+func toAttachedPolicies(policies []model.PolicyWrapper) model.AttachedPolicies {
+	ret := model.AttachedPolicies{
 		Policies: map[schema.GroupKind][]model.PolicyAtt{},
 	}
 	for _, p := range policies {
@@ -350,7 +350,7 @@ func toAttachedPolicies(policies []model.PolicyWrapper) model.AttachedPolicies[m
 			Group: p.Group,
 			Kind:  p.Kind,
 		}
-		ret.Policies[gk] = append(ret.Policies[gk], model.PolicyAtt{PolicyIr: p.PolicyIr})
+		ret.Policies[gk] = append(ret.Policies[gk], model.PolicyAtt{PolicyIr: p.PolicyIR})
 	}
 	return ret
 }

@@ -3,7 +3,7 @@ package ir
 import (
 	envoy_config_listener_v3 "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	envoy_config_route_v3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
-	extensions "github.com/solo-io/gloo/projects/gateway2/extensions2"
+	extensionsplug "github.com/solo-io/gloo/projects/gateway2/extensions2/plugin"
 	"github.com/solo-io/gloo/projects/gateway2/model"
 	"github.com/solo-io/gloo/projects/gateway2/reports"
 	"golang.org/x/net/context"
@@ -11,8 +11,10 @@ import (
 )
 
 type Translator struct {
-	Plugins extensions.Plugin
+	Plugins extensionsplug.Plugin
 }
+
+type TranslationPassPlugins map[schema.GroupKind]*TranslationPass
 
 type TranslationResult struct {
 	Routes    []*envoy_config_route_v3.RouteConfiguration
@@ -33,7 +35,7 @@ func (t *Translator) Translate(gw model.GatewayIR, reporter reports.Reporter) Tr
 	return res
 }
 
-func (h *Translator) ComputeListener(ctx context.Context, pass map[schema.GroupKind]extensions.ProxyTranslationPass, gw model.GatewayIR, l model.ListenerIR, reporter reports.Reporter) (*envoy_config_listener_v3.Listener, []*envoy_config_route_v3.RouteConfiguration) {
+func (h *Translator) ComputeListener(ctx context.Context, pass TranslationPassPlugins, gw model.GatewayIR, l model.ListenerIR, reporter reports.Reporter) (*envoy_config_listener_v3.Listener, []*envoy_config_route_v3.RouteConfiguration) {
 	hasTls := false
 	gwreporter := reporter.Gateway(gw.SourceObject)
 	var routes []*envoy_config_route_v3.RouteConfiguration
@@ -95,10 +97,21 @@ func (h *Translator) ComputeListener(ctx context.Context, pass map[schema.GroupK
 	return ret, routes
 }
 
-func (t *Translator) newPass() map[schema.GroupKind]extensions.ProxyTranslationPass {
-	ret := map[schema.GroupKind]extensions.ProxyTranslationPass{}
+func (t *Translator) newPass() TranslationPassPlugins {
+	ret := TranslationPassPlugins{}
 	for k, v := range t.Plugins.ContributesPolicies {
-		ret[k] = v.NewGatewayTranslationPass(context.TODO(), extensions.GwTranslationCtx{})
+		tp := v.NewGatewayTranslationPass(context.TODO(), model.GwTranslationCtx{})
+		if tp != nil {
+			ret[k] = &TranslationPass{
+				ProxyTranslationPass: tp,
+				Name:                 v.Name,
+			}
+		}
 	}
 	return ret
+}
+
+type TranslationPass struct {
+	model.ProxyTranslationPass
+	Name string
 }

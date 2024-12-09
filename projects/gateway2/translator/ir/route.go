@@ -11,7 +11,6 @@ import (
 	envoy_type_matcher_v3 "github.com/envoyproxy/go-control-plane/envoy/type/matcher/v3"
 	"github.com/solo-io/gloo/pkg/utils/regexutils"
 	"github.com/solo-io/gloo/projects/controller/pkg/utils"
-	extensions "github.com/solo-io/gloo/projects/gateway2/extensions2"
 	"github.com/solo-io/gloo/projects/gateway2/model"
 	"github.com/solo-io/gloo/projects/gateway2/reports"
 	"github.com/solo-io/gloo/projects/gateway2/translator/routeutils"
@@ -19,7 +18,6 @@ import (
 	"go.uber.org/zap"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
@@ -32,7 +30,7 @@ type httpRouteConfigurationTranslator struct {
 	routeConfigName          string
 	reporter                 reports.Reporter
 	requireTlsOnVirtualHosts bool
-	PluginPass               map[schema.GroupKind]extensions.ProxyTranslationPass
+	PluginPass               TranslationPassPlugins
 }
 
 func (h *httpRouteConfigurationTranslator) ComputeRouteConfiguration(ctx context.Context, vhosts []*model.VirtualHost) *envoy_config_route_v3.RouteConfiguration {
@@ -104,7 +102,7 @@ func (h *httpRouteConfigurationTranslator) computeVirtualHost(
 			continue
 		}
 		for _, pol := range pols {
-			pctx := &extensions.VirtualHostContext{
+			pctx := &model.VirtualHostContext{
 				Policy: pol,
 			}
 			pass.ApplyVhostPlugin(ctx, pctx, out)
@@ -150,7 +148,7 @@ func (h *httpRouteConfigurationTranslator) envoyRoutes(ctx context.Context,
 }
 
 func (h *httpRouteConfigurationTranslator) runVostPlugins(ctx context.Context, out *envoy_config_route_v3.VirtualHost) {
-	attachedPoliciesSlice := []model.AttachedPolicies[model.HttpPolicy]{
+	attachedPoliciesSlice := []model.AttachedPolicies{
 		h.gw.AttachedHttpPolicies,
 		h.listener.AttachedPolicies,
 	}
@@ -162,7 +160,7 @@ func (h *httpRouteConfigurationTranslator) runVostPlugins(ctx context.Context, o
 				continue
 			}
 			for _, pol := range pols {
-				pctx := &extensions.VirtualHostContext{
+				pctx := &model.VirtualHostContext{
 					Policy: pol,
 				}
 				pass.ApplyVhostPlugin(ctx, pctx, out)
@@ -176,7 +174,7 @@ func (h *httpRouteConfigurationTranslator) runRoutePlugins(ctx context.Context, 
 
 	// all policies up to listener have been applied as vhost polices; we need to apply the httproute policies and below
 
-	attachedPoliciesSlice := []model.AttachedPolicies[model.HttpPolicy]{
+	attachedPoliciesSlice := []model.AttachedPolicies{
 		in.Parent.AttachedPolicies,
 		in.AttachedPolicies,
 		in.ExtensionRefs,
@@ -192,7 +190,7 @@ func (h *httpRouteConfigurationTranslator) runRoutePlugins(ctx context.Context, 
 				continue
 			}
 			for _, pol := range pols {
-				pctx := &extensions.RouteContext{
+				pctx := &model.RouteContext{
 					Policy:   pol,
 					Reporter: routeReport,
 				}
@@ -207,7 +205,7 @@ func (h *httpRouteConfigurationTranslator) runRoutePlugins(ctx context.Context, 
 	return errors.Join(errs...)
 }
 
-func (h *httpRouteConfigurationTranslator) runBackendPolicies(ctx context.Context, in model.HttpBackend, pCtx *extensions.RouteBackendContext) error {
+func (h *httpRouteConfigurationTranslator) runBackendPolicies(ctx context.Context, in model.HttpBackend, pCtx *model.RouteBackendContext) error {
 	var errs []error
 	for gk, pols := range in.AttachedPolicies.Policies {
 		pass := h.PluginPass[gk]
@@ -217,7 +215,7 @@ func (h *httpRouteConfigurationTranslator) runBackendPolicies(ctx context.Contex
 		}
 		for _, pol := range pols {
 
-			err := pass.ApplyForRouteBackend(ctx, pCtx, pol)
+			err := pass.ApplyForRouteBackend(ctx, pol, pCtx)
 			if err != nil {
 				errs = append(errs, err)
 			}
@@ -250,7 +248,7 @@ func (h *httpRouteConfigurationTranslator) translateRouteAction(
 			Name:   clusterName,
 			Weight: weight,
 		}
-		pCtx := extensions.RouteBackendContext{
+		pCtx := model.RouteBackendContext{
 			FilterChainName:  h.fc.FilterChainName,
 			Upstream:         backend.Upstream,
 			TypedFiledConfig: &cw.TypedPerFilterConfig,

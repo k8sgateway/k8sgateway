@@ -11,14 +11,13 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 
-	extensions "github.com/solo-io/gloo/projects/gateway2/extensions2"
 	"github.com/solo-io/gloo/projects/gateway2/model"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 type UpstreamTranslator struct {
-	ContributedUpstreams map[schema.GroupKind]extensions.UpstreamImpl
-	ContributedPolicies  map[schema.GroupKind]extensions.PolicyImpl
+	ContributedUpstreams map[schema.GroupKind]model.UpstreamInit
+	ContributedPolicies  map[schema.GroupKind]model.PolicyImpl
 }
 
 func (t *UpstreamTranslator) TranslateUpstream(u model.Upstream) *envoy_config_cluster_v3.Cluster {
@@ -32,14 +31,14 @@ func (t *UpstreamTranslator) TranslateUpstream(u model.Upstream) *envoy_config_c
 		panic("TODO: report this error on the status")
 	}
 
-	if process.ProcessUpstream == nil {
+	if process.InitUpstream == nil {
 		// ERROR!
 		panic("TODO: report this error on the status")
 	}
 
 	out := initializeCluster(u)
 
-	process.ProcessUpstream(context.TODO(), u, out)
+	process.InitUpstream(context.TODO(), u, out)
 
 	// now process upstream policies:
 	t.runPlugins(context.TODO(), u, out)

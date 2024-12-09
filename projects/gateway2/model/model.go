@@ -44,7 +44,7 @@ type Upstream struct {
 	// i think so, assuming obj -> objir is a 1:1 mapping.
 	ObjIr interface{ Equals(any) bool }
 
-	AttachedPolicies AttachedPolicies[UpstreamPolicy]
+	AttachedPolicies AttachedPolicies
 }
 
 func (c Upstream) ResourceName() string {

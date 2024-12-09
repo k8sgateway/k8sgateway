@@ -16,7 +16,7 @@ import (
 	envoy_config_route_v3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	"github.com/solo-io/gloo/projects/controller/pkg/plugins"
 	"github.com/solo-io/gloo/projects/gateway2/api/v1alpha1"
-	extensions "github.com/solo-io/gloo/projects/gateway2/extensions2"
+	extensionplug "github.com/solo-io/gloo/projects/gateway2/extensions2/plugin"
 	"github.com/solo-io/gloo/projects/gateway2/model"
 	"github.com/solo-io/gloo/projects/gateway2/reports"
 	"github.com/solo-io/go-utils/contextutils"
@@ -26,10 +26,13 @@ import (
 	"istio.io/istio/pkg/kube/kubetypes"
 )
 
-type plugin2 struct {
+type directResponse struct {
+	spec v1alpha1.DirectResponseSpec
+}
+type directResponseGwPass struct {
 }
 
-func NewPlugin2(ctx context.Context, istioClient kube.Client, dbg *krt.DebugHandler) *extensions.Plugin {
+func NewPlugin2(ctx context.Context, istioClient kube.Client, dbg *krt.DebugHandler) *extensionplug.Plugin {
 
 	col := SetupCollectionDynamic[v1alpha1.DirectResponse](
 		ctx,
@@ -47,48 +50,43 @@ func NewPlugin2(ctx context.Context, istioClient kube.Client, dbg *krt.DebugHand
 				Name:      i.Name,
 			},
 			Policy:   i,
-			PolicyIr: i,
+			PolicyIR: &directResponse{spec: i.Spec},
 			// no target refs for direct response
 		}
 		return pol
 	})
 
-	return &extensions.Plugin{
-		ContributesPolicies: map[schema.GroupKind]extensions.PolicyImpl{
+	return &extensionplug.Plugin{
+		ContributesPolicies: map[schema.GroupKind]model.PolicyImpl{
 			v1alpha1.DirectResponseGVK.GroupKind(): {
-				AttachmentPoints:          []model.AttachmentPoints{model.HttpAttachmentPoint},
-				NewGatewayTranslationPass: newPlug,
-				Policies:                  policyCol,
+				Name:             "directresponse",
+				AttachmentPoints: []model.AttachmentPoints{model.HttpAttachmentPoint},
+				//	NewGatewayTranslationPass: newPlug,
+				Policies: policyCol,
+				//				AttachmentPoints:          []model.AttachmentPoints{model.HttpAttachmentPoint},
+				NewGatewayTranslationPass: NewGatewayTranslationPass,
 			},
 		},
 	}
 }
 
-func newPlug(ctx context.Context, tctx extensions.GwTranslationCtx) extensions.ProxyTranslationPass {
-	return &plugin2{}
-}
-
-func (p *plugin2) Name() string {
-	return "directresponse"
+func NewGatewayTranslationPass(ctx context.Context, tctx model.GwTranslationCtx) model.ProxyTranslationPass {
+	return &directResponseGwPass{}
 }
 
 // called 1 time for each listener
-func (p *plugin2) ApplyListenerPlugin(ctx context.Context, pCtx *extensions.ListenerContext, out *envoy_config_listener_v3.Listener) {
+func (p *directResponseGwPass) ApplyListenerPlugin(ctx context.Context, pCtx *model.ListenerContext, out *envoy_config_listener_v3.Listener) {
 }
 
-func (p *plugin2) ApplyVhostPlugin(ctx context.Context, pCtx *extensions.VirtualHostContext, out *envoy_config_route_v3.VirtualHost) {
+func (p *directResponseGwPass) ApplyVhostPlugin(ctx context.Context, pCtx *model.VirtualHostContext, out *envoy_config_route_v3.VirtualHost) {
 }
 
 // called 0 or more times
-func (p *plugin2) ApplyForRoute(ctx context.Context, pCtx *extensions.RouteContext, outputRoute *envoy_config_route_v3.Route) error {
-	dr, ok := pCtx.Policy.PolicyIr.(*v1alpha1.DirectResponse)
+func (p *directResponseGwPass) ApplyForRoute(ctx context.Context, pCtx *model.RouteContext, outputRoute *envoy_config_route_v3.Route) error {
+	dr, ok := pCtx.Policy.(*directResponse)
 	if !ok {
-		return fmt.Errorf("internal error: policy is not a DirectResponse")
+		return fmt.Errorf("internal error: expected *directResponse, got %T", pCtx.Policy)
 	}
-
-	// TODO: if we want to validate that only one applies, the context can contain all attached policies of
-	// this GK.
-
 	// at this point, we have a valid DR reference that we should apply to the route.
 	if outputRoute.GetAction() != nil {
 		// the output route already has an action, which is incompatible with the DirectResponse,
@@ -111,10 +109,10 @@ func (p *plugin2) ApplyForRoute(ctx context.Context, pCtx *extensions.RouteConte
 
 	outputRoute.Action = &envoy_config_route_v3.Route_DirectResponse{
 		DirectResponse: &envoy_config_route_v3.DirectResponseAction{
-			Status: dr.GetStatusCode(),
+			Status: dr.spec.StatusCode,
 			Body: &corev3.DataSource{
 				Specifier: &corev3.DataSource_InlineString{
-					InlineString: dr.GetBody(),
+					InlineString: dr.spec.Body,
 				},
 			},
 		},
@@ -122,32 +120,32 @@ func (p *plugin2) ApplyForRoute(ctx context.Context, pCtx *extensions.RouteConte
 	return nil
 }
 
-func (p *plugin2) ApplyForRouteBackend(
+func (p *directResponseGwPass) ApplyForRouteBackend(
 	ctx context.Context,
-	pCtx *extensions.RouteBackendContext,
-	policy model.PolicyAtt,
+	policy model.PolicyIR,
+	pCtx *model.RouteBackendContext,
 ) error {
-	return nil
+	return model.ErrNotAttachable
 }
 
 // called 1 time per listener
 // if a plugin emits new filters, they must be with a plugin unique name.
 // any filter returned from route config must be disabled, so it doesnt impact other routes.
-func (p *plugin2) HttpFilters(ctx context.Context, fcc model.FilterChainCommon) ([]plugins.StagedHttpFilter, error) {
+func (p *directResponseGwPass) HttpFilters(ctx context.Context, fcc model.FilterChainCommon) ([]plugins.StagedHttpFilter, error) {
 	return nil, nil
 }
 
-func (p *plugin2) UpstreamHttpFilters(ctx context.Context) ([]plugins.StagedUpstreamHttpFilter, error) {
+func (p *directResponseGwPass) UpstreamHttpFilters(ctx context.Context) ([]plugins.StagedUpstreamHttpFilter, error) {
 	return nil, nil
 }
 
-func (p *plugin2) NetworkFilters(ctx context.Context) ([]plugins.StagedNetworkFilter, error) {
+func (p *directResponseGwPass) NetworkFilters(ctx context.Context) ([]plugins.StagedNetworkFilter, error) {
 	return nil, nil
 }
 
 // called 1 time (per envoy proxy). replaces GeneratedResources
-func (p *plugin2) ResourcesToAdd(ctx context.Context) extensions.Resources {
-	return extensions.Resources{}
+func (p *directResponseGwPass) ResourcesToAdd(ctx context.Context) model.Resources {
+	return model.Resources{}
 }
 
 // SetupCollectionDynamic uses the dynamic client to setup an informer for a resource

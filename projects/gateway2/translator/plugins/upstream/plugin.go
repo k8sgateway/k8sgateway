@@ -17,7 +17,7 @@ import (
 	envoy_config_route_v3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	"github.com/solo-io/gloo/projects/controller/pkg/plugins"
 	"github.com/solo-io/gloo/projects/gateway2/api/v1alpha1"
-	extensions "github.com/solo-io/gloo/projects/gateway2/extensions2"
+	extensionsplug "github.com/solo-io/gloo/projects/gateway2/extensions2/plugin"
 	"github.com/solo-io/gloo/projects/gateway2/krtcollections"
 	"github.com/solo-io/gloo/projects/gateway2/model"
 	"istio.io/istio/pkg/kube"
@@ -71,7 +71,7 @@ type plugin2 struct {
 	needFilter map[string]bool
 }
 
-func NewPlugin2(ctx context.Context, istioClient kube.Client, secrets krt.Collection[*corev1.Secret], dbg *krt.DebugHandler) *extensions.Plugin {
+func NewPlugin2(ctx context.Context, istioClient kube.Client, secrets krt.Collection[*corev1.Secret], dbg *krt.DebugHandler) *extensionsplug.Plugin {
 
 	col := SetupCollectionDynamic[v1alpha1.Upstream](
 		ctx,
@@ -102,23 +102,23 @@ func NewPlugin2(ctx context.Context, istioClient kube.Client, secrets krt.Collec
 	epndpoints := krt.NewCollection(col, func(krtctx krt.HandlerContext, i *v1alpha1.Upstream) *krtcollections.EndpointsForUpstream {
 		return processEndpoints(i)
 	})
-	return &extensions.Plugin{
-		ContributesUpstreams: map[schema.GroupKind]extensions.UpstreamImpl{
+	return &extensionsplug.Plugin{
+		ContributesUpstreams: map[schema.GroupKind]extensionsplug.UpstreamImpl{
 			gk: {
-				Endpoints:       epndpoints,
-				ProcessUpstream: processUpstream,
-				Upstreams:       ucol,
+				UpstreamInit: model.UpstreamInit{
+					InitUpstream: processUpstream,
+				},
+				Endpoints: epndpoints,
+				Upstreams: ucol,
 			},
 		},
-		ContributesPolicies: map[schema.GroupKind]extensions.PolicyImpl{
+		ContributesPolicies: map[schema.GroupKind]model.PolicyImpl{
 			ParameterGK: {
 				AttachmentPoints: []model.AttachmentPoints{model.HttpBackendRefAttachmentPoint},
-				PoliciesFetch: func(n, ns string) model.PolicyWrapper {
+				PoliciesFetch: func(n, ns string) model.PolicyIR {
 					// virtual policy - we don't have a real policy object
-					return model.PolicyWrapper{
-						PolicyIr: &UpstreamDestination{
-							FunctionName: n,
-						},
+					return &UpstreamDestination{
+						FunctionName: n,
 					}
 				},
 			},
@@ -186,7 +186,7 @@ func processEndpoints(up *v1alpha1.Upstream) *krtcollections.EndpointsForUpstrea
 	return nil
 }
 
-func newPlug(ctx context.Context, tctx extensions.GwTranslationCtx) extensions.ProxyTranslationPass {
+func newPlug(ctx context.Context, tctx model.GwTranslationCtx) model.ProxyTranslationPass {
 	return &plugin2{}
 }
 
@@ -195,24 +195,23 @@ func (p *plugin2) Name() string {
 }
 
 // called 1 time for each listener
-func (p *plugin2) ApplyListenerPlugin(ctx context.Context, pCtx *extensions.ListenerContext, out *envoy_config_listener_v3.Listener) {
+func (p *plugin2) ApplyListenerPlugin(ctx context.Context, pCtx *model.ListenerContext, out *envoy_config_listener_v3.Listener) {
 }
 
-func (p *plugin2) ApplyVhostPlugin(ctx context.Context, pCtx *extensions.VirtualHostContext, out *envoy_config_route_v3.VirtualHost) {
+func (p *plugin2) ApplyVhostPlugin(ctx context.Context, pCtx *model.VirtualHostContext, out *envoy_config_route_v3.VirtualHost) {
 }
 
 // called 0 or more times
-func (p *plugin2) ApplyForRoute(ctx context.Context, pCtx *extensions.RouteContext, outputRoute *envoy_config_route_v3.Route) error {
+func (p *plugin2) ApplyForRoute(ctx context.Context, pCtx *model.RouteContext, outputRoute *envoy_config_route_v3.Route) error {
 
 	return nil
 }
 
 func (p *plugin2) ApplyForRouteBackend(
-	ctx context.Context,
-	pCtx *extensions.RouteBackendContext,
-	policy model.PolicyAtt,
+	ctx context.Context, policy model.PolicyIR,
+	pCtx *model.RouteBackendContext,
 ) error {
-	pol, ok := policy.PolicyIr.(*UpstreamDestination)
+	pol, ok := policy.(*UpstreamDestination)
 	if !ok {
 		return nil
 		// todo: should we return fmt.Errorf("internal error: policy is not a UpstreamDestination")
@@ -245,8 +244,8 @@ func (p *plugin2) NetworkFilters(ctx context.Context) ([]plugins.StagedNetworkFi
 }
 
 // called 1 time (per envoy proxy). replaces GeneratedResources
-func (p *plugin2) ResourcesToAdd(ctx context.Context) extensions.Resources {
-	return extensions.Resources{}
+func (p *plugin2) ResourcesToAdd(ctx context.Context) model.Resources {
+	return model.Resources{}
 }
 
 // SetupCollectionDynamic uses the dynamic client to setup an informer for a resource

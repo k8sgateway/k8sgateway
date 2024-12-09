@@ -19,14 +19,12 @@ import (
 	envoy_tls_inspector "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/listener/tls_inspector/v3"
 	"github.com/solo-io/gloo/projects/controller/pkg/plugins"
 	"github.com/solo-io/gloo/projects/controller/pkg/translator"
-	extensions "github.com/solo-io/gloo/projects/gateway2/extensions2"
 	"github.com/solo-io/gloo/projects/gateway2/model"
 	"github.com/solo-io/gloo/projects/gateway2/reports"
 	"github.com/solo-io/go-utils/contextutils"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
@@ -39,7 +37,7 @@ type filterChainTranslator struct {
 	listener        model.ListenerIR
 	routeConfigName string
 
-	PluginPass map[schema.GroupKind]extensions.ProxyTranslationPass
+	PluginPass TranslationPassPlugins
 }
 
 func computeListenerAddress(bindAddress string, port uint32, reporter reports.GatewayReporter) *envoy_config_core_v3.Address {
@@ -180,7 +178,7 @@ func sortNetworkFilters(filters plugins.StagedNetworkFilterList) []*envoy_config
 
 type hcmNetworkFilterTranslator struct {
 	routeConfigName string
-	PluginPass      map[schema.GroupKind]extensions.ProxyTranslationPass
+	PluginPass      TranslationPassPlugins
 	reporter        reports.ListenerReporter
 	listener        model.HttpFilterChainIR
 }
@@ -263,7 +261,7 @@ func (h *hcmNetworkFilterTranslator) computeHttpFilters(ctx context.Context, l m
 
 		for _, httpFilter := range stagedFilters {
 			if httpFilter.Filter == nil {
-				log.Warn("HttpFilters() returned nil", zap.String("name", plug.Name()))
+				log.Warn("HttpFilters() returned nil", zap.String("name", plug.Name))
 				continue
 			}
 			httpFilters = append(httpFilters, httpFilter)
@@ -331,7 +329,7 @@ func (h *hcmNetworkFilterTranslator) computeUpstreamHTTPFilters(ctx context.Cont
 		}
 		for _, httpFilter := range stagedFilters {
 			if httpFilter.Filter == nil {
-				log.Warn("HttpFilters() returned nil", zap.String("name", plug.Name()))
+				log.Warn("HttpFilters() returned nil", zap.String("name", plug.Name))
 				continue
 			}
 			upstreamHttpFilters = append(upstreamHttpFilters, httpFilter)

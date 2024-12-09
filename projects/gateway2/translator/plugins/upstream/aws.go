@@ -15,8 +15,8 @@ import (
 	"github.com/solo-io/gloo/projects/controller/pkg/plugins/pluginutils"
 	"github.com/solo-io/gloo/projects/controller/pkg/utils"
 	"github.com/solo-io/gloo/projects/gateway2/api/v1alpha1"
-	extensions "github.com/solo-io/gloo/projects/gateway2/extensions2"
 	"github.com/solo-io/gloo/projects/gateway2/krtcollections"
+	"github.com/solo-io/gloo/projects/gateway2/model"
 	"google.golang.org/protobuf/types/known/anypb"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -105,7 +105,7 @@ func processEndpointsAws(in *v1alpha1.AwsUpstream) *krtcollections.EndpointsForU
 
 func (p *plugin2) processBackendAws(
 	ctx context.Context,
-	pCtx *extensions.RouteBackendContext,
+	pCtx *model.RouteBackendContext,
 	dest *UpstreamDestination,
 ) error {
 

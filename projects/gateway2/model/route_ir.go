@@ -1,12 +1,12 @@
 package model
 
 import (
-	"fmt"
+	"context"
 
+	envoy_config_cluster_v3 "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	"github.com/solo-io/gloo/projects/controller/pkg/plugins"
 	"google.golang.org/protobuf/types/known/anypb"
 	"istio.io/istio/pkg/kube/krt"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
@@ -21,6 +21,10 @@ const (
 	UpstreamAttachmentPoint
 )
 
+type UpstreamInit struct {
+	InitUpstream func(ctx context.Context, in Upstream, out *envoy_config_cluster_v3.Cluster)
+}
+
 type PolicyTargetRef struct {
 	Group       string
 	Kind        string
@@ -28,50 +32,15 @@ type PolicyTargetRef struct {
 	SectionName string
 }
 
-type PolicyWrapper struct {
-	ObjectSource `json:",inline"`
-
-	// Errors processing it for status.
-	// note: these errors are based on policy itself, regardless of whether it's attached to a resource.
-	// TODO: change for conditions
-	Errors []error
-
-	// original object. ideally with structural errors removed.
-	// Opaque to us other than metadata.
-	Policy   metav1.Object
-	PolicyIr any
-
-	TargetRefs []PolicyTargetRef
-}
-
-func (c PolicyWrapper) ResourceName() string {
-	return fmt.Sprintf("%s/%s/%s/%s", c.Group, c.Kind, c.Namespace, c.Name)
-}
-
-func (c PolicyWrapper) Obj() metav1.Object {
-	return c.Policy
-}
-
-func (c PolicyWrapper) Equals(in PolicyWrapper) bool {
-	var versionEquals bool
-	if c.Policy.GetGeneration() != 0 && in.Policy.GetGeneration() != 0 {
-		versionEquals = c.Policy.GetGeneration() == in.Policy.GetGeneration()
-	} else {
-		versionEquals = c.Policy.GetResourceVersion() == in.Policy.GetResourceVersion()
-	}
-
-	return versionEquals && c.Policy.GetUID() == in.Policy.GetUID()
-}
-
 type PolicyAtt struct {
 	// original object. ideally with structural errors removed.
 	// Opaque to us other than metadata.
-	PolicyIr any
+	PolicyIr PolicyIR
 
 	PolicyTargetRef PolicyTargetRef
 }
 
-func (c PolicyAtt) Obj() any {
+func (c PolicyAtt) Obj() PolicyIR {
 	return c.PolicyIr
 }
 
@@ -79,22 +48,23 @@ func (c PolicyAtt) TargetRef() PolicyTargetRef {
 	return c.PolicyTargetRef
 }
 
-type AttachedPolicy interface {
-	Obj() metav1.Object
-	TargetRef() PolicyTargetRef
+type HttpBackendPolicy interface {
+	markAdBackendPolicy()
 }
 
-type Policies []AttachedPolicy
+type AttachableToHttpBackendPolicy struct{}
+
+func (AttachableToHttpBackendPolicy) markAdBackendPolicy() {}
 
 //type AttachedPolicies map[string]Policies
 
-type NetworkPolicy AttachedPolicy
-type HttpPolicy AttachedPolicy
-type UpstreamPolicy AttachedPolicy
-type HttpBackendPolicy AttachedPolicy
-type ListenerPolicy AttachedPolicy
+// type NetworkPolicy AttachedPolicy
+// type HttpPolicy AttachedPolicy
+// type UpstreamPolicy AttachedPolicy
 
-type AttachedPolicies[P AttachedPolicy] struct {
+// type ListenerPolicy AttachedPolicy
+
+type AttachedPolicies struct {
 	Policies map[schema.GroupKind][]PolicyAtt
 }
 
@@ -141,7 +111,7 @@ type Backend struct {
 */
 type HttpBackend struct {
 	Backend
-	AttachedPolicies[HttpBackendPolicy]
+	AttachedPolicies
 }
 
 type HttpRouteIR struct {
@@ -149,15 +119,15 @@ type HttpRouteIR struct {
 	SourceObject     client.Object
 	ParentRefs       []gwv1.ParentReference
 	Hostnames        []string
-	AttachedPolicies AttachedPolicies[HttpPolicy]
+	AttachedPolicies AttachedPolicies
 	Rules            []HttpRouteRuleIR
 }
 
 // type HttpRouteRuleIR struct {
 // 	gwv1.HTTPRouteRule
 // 	Parent           HttpRouteIR
-// 	ExtensionRefs    AttachedPolicies[HttpPolicy]
-// 	AttachedPolicies AttachedPolicies[HttpPolicy]
+// 	ExtensionRefs    AttachedPolicies
+// 	AttachedPolicies AttachedPolicies
 //
 // 	Backends []HttpBackend
 // }
@@ -170,8 +140,8 @@ type HttpRouteRuleIR struct {
 	Parent           *HttpRouteIR
 	SourceRule       *gwv1.HTTPRouteRule
 	Name             string
-	ExtensionRefs    AttachedPolicies[HttpPolicy]
-	AttachedPolicies AttachedPolicies[HttpPolicy]
+	ExtensionRefs    AttachedPolicies
+	AttachedPolicies AttachedPolicies
 	Backends         []HttpBackend
 }
 
@@ -188,7 +158,7 @@ type ListenerIR struct {
 	Name             string
 	BindAddress      string
 	BindPort         uint32
-	AttachedPolicies AttachedPolicies[HttpPolicy]
+	AttachedPolicies AttachedPolicies
 
 	HttpFilterChain []HttpFilterChainIR
 	TcpFilterChain  []TcpIR
@@ -230,8 +200,8 @@ type HttpFilterChainIR struct {
 	FilterChainCommon
 	Vhosts                  []*VirtualHost
 	ParentRef               gwv1.ParentReference
-	AttachedPolicies        AttachedPolicies[HttpPolicy]
-	AttachedNetworkPolicies AttachedPolicies[NetworkPolicy]
+	AttachedPolicies        AttachedPolicies
+	AttachedNetworkPolicies AttachedPolicies
 }
 
 type TcpIR struct {
@@ -245,15 +215,15 @@ type GatewayIR struct {
 	Listeners    []ListenerIR
 	SourceObject *gwv1.Gateway
 
-	AttachedPolicies     AttachedPolicies[ListenerPolicy]
-	AttachedHttpPolicies AttachedPolicies[HttpPolicy]
+	AttachedPolicies     AttachedPolicies
+	AttachedHttpPolicies AttachedPolicies
 }
 
 type GatewayWithPoliciesIR struct {
 	SourceObject *gwv1.Gateway
 
-	AttachedPolicies     AttachedPolicies[ListenerPolicy]
-	AttachedHttpPolicies AttachedPolicies[HttpPolicy]
+	AttachedPolicies     AttachedPolicies
+	AttachedHttpPolicies AttachedPolicies
 }
 
 type Extension struct {

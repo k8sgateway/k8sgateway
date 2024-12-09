@@ -1,28 +1,26 @@
-package extensions
+package model
 
 import (
 	"context"
+	"fmt"
 
 	envoy_config_cluster_v3 "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	envoy_config_listener_v3 "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	envoy_config_route_v3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	"github.com/solo-io/gloo/projects/controller/pkg/plugins"
-	"github.com/solo-io/gloo/projects/gateway2/krtcollections"
-	"github.com/solo-io/gloo/projects/gateway2/model"
 	"github.com/solo-io/gloo/projects/gateway2/reports"
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	"istio.io/istio/pkg/kube/krt"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type ListenerContext struct{}
 type VirtualHostContext struct {
-	Policy model.PolicyAtt
+	Policy PolicyIR
 }
 type RouteBackendContext struct {
 	FilterChainName string
-	Upstream        *model.Upstream
+	Upstream        *Upstream
 	// todo: make this not public
 	TypedFiledConfig *map[string]*anypb.Any
 }
@@ -35,12 +33,12 @@ func (r *RouteBackendContext) AddTypedConfig(key string, v *anypb.Any) {
 }
 
 type RouteContext struct {
-	Policy   model.PolicyAtt
+	Policy   PolicyIR
 	Reporter reports.ParentRefReporter
 }
 
 type ProxyTranslationPass interface {
-	Name() string
+	//	Name() string
 	// called 1 time for each listener
 	ApplyListenerPlugin(
 		ctx context.Context,
@@ -60,13 +58,13 @@ type ProxyTranslationPass interface {
 		out *envoy_config_route_v3.Route) error
 	ApplyForRouteBackend(
 		ctx context.Context,
+		policy PolicyIR,
 		pCtx *RouteBackendContext,
-		policy model.PolicyAtt,
 	) error
 	// called 1 time per listener
 	// if a plugin emits new filters, they must be with a plugin unique name.
 	// any filter returned from route config must be disabled, so it doesnt impact other routes.
-	HttpFilters(ctx context.Context, fc model.FilterChainCommon) ([]plugins.StagedHttpFilter, error)
+	HttpFilters(ctx context.Context, fc FilterChainCommon) ([]plugins.StagedHttpFilter, error)
 	UpstreamHttpFilters(ctx context.Context) ([]plugins.StagedUpstreamHttpFilter, error)
 
 	NetworkFilters(ctx context.Context) ([]plugins.StagedNetworkFilter, error)
@@ -80,34 +78,58 @@ type Resources struct {
 
 type GwTranslationCtx struct{}
 
-type PolicyImpl struct {
-	AttachmentPoints          []model.AttachmentPoints
-	NewGatewayTranslationPass func(ctx context.Context, tctx GwTranslationCtx) ProxyTranslationPass
-	Policies                  krt.Collection[model.PolicyWrapper]
-	PoliciesFetch             func(n, ns string) model.PolicyWrapper
-	ProcessUpstream           func(ctx context.Context, policy model.PolicyAtt, in model.Upstream, out *envoy_config_cluster_v3.Cluster)
-}
-type UpstreamImpl struct {
-	ProcessUpstream func(ctx context.Context, in model.Upstream, out *envoy_config_cluster_v3.Cluster)
-	Upstreams       krt.Collection[model.Upstream]
-	Endpoints       krt.Collection[krtcollections.EndpointsForUpstream]
-}
-type Plugin struct {
-	ContributesPolicies  map[schema.GroupKind]PolicyImpl
-	ContributesUpstreams map[schema.GroupKind]UpstreamImpl
-	ContributesGwClasses map[string]interface {
-		// TranslateProxy This function is called by the reconciler when a K8s Gateway resource is created or updated.
-		// It returns an instance of the k8sgateway Proxy resource, that should configure a target k8sgateway Proxy workload.
-		// A null return value indicates the K8s Gateway resource failed to translate into a k8sgateway Proxy. The error will be reported on the provided reporter.
-		TranslateProxy(
-			ctx context.Context,
-			gateway *gwv1.Gateway,
-			writeNamespace string,
-			reporter reports.Reporter,
-		) *model.GatewayIR
-	}
+type PolicyIR any
+
+type PolicyWrapper struct {
+	ObjectSource `json:",inline"`
+	Policy       metav1.Object
+
+	// Errors processing it for status.
+	// note: these errors are based on policy itself, regardless of whether it's attached to a resource.
+	// TODO: change for conditions
+	Errors []error
+
+	// original object. ideally with structural errors removed.
+	// Opaque to us other than metadata.
+	PolicyIR PolicyIR
+
+	TargetRefs []PolicyTargetRef
 }
 
-type K8sGatewayExtensions2 struct {
-	Plugins []Plugin
+func (c PolicyWrapper) ResourceName() string {
+	return fmt.Sprintf("%s/%s/%s/%s", c.Group, c.Kind, c.Namespace, c.Name)
+}
+
+func (c PolicyWrapper) Equals(in PolicyWrapper) bool {
+	if c.ObjectSource != in.ObjectSource {
+		return false
+	}
+	var versionEquals bool
+	if c.Policy.GetGeneration() != 0 && in.Policy.GetGeneration() != 0 {
+		versionEquals = c.Policy.GetGeneration() == in.Policy.GetGeneration()
+	} else {
+		versionEquals = c.Policy.GetResourceVersion() == in.Policy.GetResourceVersion()
+	}
+
+	return versionEquals && c.Policy.GetUID() == in.Policy.GetUID()
+}
+
+var (
+	ErrNotAttachable = fmt.Errorf("policy is not attachable to this object")
+)
+
+type PolicyRun interface {
+	NewGatewayTranslationPass(ctx context.Context, tctx GwTranslationCtx) ProxyTranslationPass
+	ProcessUpstream(ctx context.Context, in Upstream, out *envoy_config_cluster_v3.Cluster) error
+}
+
+type PolicyImpl struct {
+	Name string
+	// TODO: remove this, each func below is attachment point.
+	AttachmentPoints          []AttachmentPoints
+	NewGatewayTranslationPass func(ctx context.Context, tctx GwTranslationCtx) ProxyTranslationPass
+	ProcessUpstream           func(ctx context.Context, pol PolicyIR, in Upstream, out *envoy_config_cluster_v3.Cluster)
+
+	Policies      krt.Collection[PolicyWrapper]
+	PoliciesFetch func(n, ns string) PolicyIR
 }
