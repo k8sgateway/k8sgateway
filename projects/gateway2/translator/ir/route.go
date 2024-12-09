@@ -116,7 +116,7 @@ func (h *httpRouteConfigurationTranslator) computeVirtualHost(
 func (h *httpRouteConfigurationTranslator) envoyRoutes(ctx context.Context,
 	virtualHost *model.VirtualHost,
 	routeReport reports.ParentRefReporter,
-	in model.HttpRouteRuleIR,
+	in model.HttpRouteRuleMatchIR,
 	generatedName string,
 ) *envoy_config_route_v3.Route {
 
@@ -170,7 +170,7 @@ func (h *httpRouteConfigurationTranslator) runVostPlugins(ctx context.Context, o
 	}
 }
 
-func (h *httpRouteConfigurationTranslator) runRoutePlugins(ctx context.Context, routeReport reports.ParentRefReporter, in model.HttpRouteRuleIR, out *envoy_config_route_v3.Route) error {
+func (h *httpRouteConfigurationTranslator) runRoutePlugins(ctx context.Context, routeReport reports.ParentRefReporter, in model.HttpRouteRuleMatchIR, out *envoy_config_route_v3.Route) error {
 
 	// all policies up to listener have been applied as vhost polices; we need to apply the httproute policies and below
 
@@ -191,8 +191,7 @@ func (h *httpRouteConfigurationTranslator) runRoutePlugins(ctx context.Context, 
 			}
 			for _, pol := range pols {
 				pctx := &model.RouteContext{
-					Policy:   pol,
-					Reporter: routeReport,
+					Policy: pol,
 				}
 				err := pass.ApplyForRoute(ctx, pctx, out)
 				if err != nil {
@@ -202,7 +201,17 @@ func (h *httpRouteConfigurationTranslator) runRoutePlugins(ctx context.Context, 
 			}
 		}
 	}
-	return errors.Join(errs...)
+	err := errors.Join(errs...)
+	if err != nil {
+		routeReport.SetCondition(reports.RouteCondition{
+			Type:    gwv1.RouteConditionAccepted,
+			Status:  metav1.ConditionFalse,
+			Reason:  gwv1.RouteReasonIncompatibleFilters,
+			Message: err.Error(),
+		})
+	}
+
+	return err
 }
 
 func (h *httpRouteConfigurationTranslator) runBackendPolicies(ctx context.Context, in model.HttpBackend, pCtx *model.RouteBackendContext) error {
@@ -226,17 +235,17 @@ func (h *httpRouteConfigurationTranslator) runBackendPolicies(ctx context.Contex
 }
 
 func (h *httpRouteConfigurationTranslator) translateRouteAction(
-	in model.HttpRouteRuleIR,
+	in model.HttpRouteRuleMatchIR,
 	outRoute *envoy_config_route_v3.Route,
 ) *envoy_config_route_v3.Route_Route {
 	var clusters []*envoy_config_route_v3.WeightedCluster_ClusterWeight
 
 	for _, backend := range in.Backends {
-		clusterName := backend.ClusterName
+		clusterName := backend.Backend.ClusterName
 
 		var weight *wrapperspb.UInt32Value
-		if backend.Weight != 0 {
-			weight = wrapperspb.UInt32(backend.Weight)
+		if backend.Backend.Weight != 0 {
+			weight = wrapperspb.UInt32(backend.Backend.Weight)
 		} else {
 			// according to spec, default weight is 1
 			weight = wrapperspb.UInt32(1)
@@ -250,7 +259,7 @@ func (h *httpRouteConfigurationTranslator) translateRouteAction(
 		}
 		pCtx := model.RouteBackendContext{
 			FilterChainName:  h.fc.FilterChainName,
-			Upstream:         backend.Upstream,
+			Upstream:         backend.Backend.Upstream,
 			TypedFiledConfig: &cw.TypedPerFilterConfig,
 		}
 
@@ -330,7 +339,7 @@ func validateEnvoyRoute(r *envoy_config_route_v3.Route) error {
 // creates Envoy routes for each matcher provided on our Gateway route
 func (h *httpRouteConfigurationTranslator) initRoutes(
 	virtualHost *model.VirtualHost,
-	in model.HttpRouteRuleIR,
+	in model.HttpRouteRuleMatchIR,
 	routeReport reports.ParentRefReporter,
 	generatedName string,
 ) *envoy_config_route_v3.Route {

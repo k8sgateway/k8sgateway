@@ -2,6 +2,7 @@ package ir
 
 import (
 	"container/list"
+	"errors"
 
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -9,7 +10,6 @@ import (
 
 	"github.com/rotisserie/eris"
 	"github.com/solo-io/gloo/projects/gateway2/model"
-	"github.com/solo-io/gloo/projects/gateway2/translator/backendref"
 	"github.com/solo-io/gloo/projects/gateway2/translator/plugins"
 )
 
@@ -20,13 +20,13 @@ import (
 // If the child route is invalid, it will be ignored and its Status will be updated accordingly.
 func flattenDelegatedRoutes(
 	parent *RouteInfo,
-	backendRef gwv1.HTTPBackendRef,
+	backendRef model.HttpBackendOrDelegate,
 	parentMatch gwv1.HTTPRouteMatch,
-	outputs *[]*model.HttpRouteRuleIR,
+	outputs *[]*model.HttpRouteRuleMatchIR,
 	routesVisited sets.Set[types.NamespacedName],
 	delegationChain *list.List,
 ) error {
-	parentRoute, ok := parent.Object.(*gwv1.HTTPRoute)
+	parentRoute, ok := parent.Object.(*model.HttpRouteIR)
 	if !ok {
 		return eris.Errorf("unsupported route type: %T", parent.Object)
 	}
@@ -40,22 +40,22 @@ func flattenDelegatedRoutes(
 	lRef := delegationChain.PushFront(delegationCtx)
 	defer delegationChain.Remove(lRef)
 
-	rawChildren, err := parent.GetChildrenForRef(backendRef.BackendObjectReference)
+	rawChildren, err := parent.GetChildrenForRef(*backendRef.Delegate)
 	if len(rawChildren) == 0 || err != nil {
 		if err == nil {
-			err = eris.Errorf("unresolved reference %s", backendref.ToString(backendRef.BackendObjectReference))
+			err = eris.Errorf("unresolved reference %s", backendRef.Delegate.ResourceName())
 		}
 		return err
 	}
 	children := filterDelegatedChildren(parentRef, parentMatch, rawChildren)
 
 	// Child routes inherit the hostnames from the parent route
-	hostnames := make([]gwv1.Hostname, len(parentRoute.Spec.Hostnames))
-	copy(hostnames, parentRoute.Spec.Hostnames)
+	hostnames := make([]string, len(parentRoute.Hostnames))
+	copy(hostnames, parentRoute.Hostnames)
 
 	// For these child routes, recursively flatten them
 	for _, child := range children {
-		childRoute, ok := child.Object.(*gwv1.HTTPRoute)
+		childRoute, ok := child.Object.(*model.HttpRouteIR)
 		if !ok {
 			// msg := fmt.Sprintf("ignoring unsupported child route type %T for parent httproute %v", child.Object, parentRef)
 			// contextutils.LoggerFrom(ctx).Warn(msg)
@@ -103,10 +103,10 @@ func flattenDelegatedRoutes(
 }
 
 func validateChildRoute(
-	route gwv1.HTTPRoute,
+	route model.HttpRouteIR,
 ) error {
-	if len(route.Spec.Hostnames) > 0 {
-		return eris.New("spec.hostnames must be unset on a delegatee route as they are inherited from the parent route")
+	if len(route.Hostnames) > 0 {
+		return errors.New("spec.hostnames must be unset on a delegatee route as they are inherited from the parent route")
 	}
 	return nil
 }

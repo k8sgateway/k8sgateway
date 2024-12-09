@@ -8,7 +8,6 @@ import (
 	envoy_config_listener_v3 "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	envoy_config_route_v3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
 	"github.com/solo-io/gloo/projects/controller/pkg/plugins"
-	"github.com/solo-io/gloo/projects/gateway2/reports"
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	"istio.io/istio/pkg/kube/krt"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,8 +32,7 @@ func (r *RouteBackendContext) AddTypedConfig(key string, v *anypb.Any) {
 }
 
 type RouteContext struct {
-	Policy   PolicyIR
-	Reporter reports.ParentRefReporter
+	Policy PolicyIR
 }
 
 type ProxyTranslationPass interface {
@@ -97,21 +95,25 @@ type PolicyWrapper struct {
 }
 
 func (c PolicyWrapper) ResourceName() string {
-	return fmt.Sprintf("%s/%s/%s/%s", c.Group, c.Kind, c.Namespace, c.Name)
+	return c.ObjectSource.ResourceName()
+}
+
+func versionEquals(a, b metav1.Object) bool {
+	var versionEquals bool
+	if a.GetGeneration() != 0 && b.GetGeneration() != 0 {
+		versionEquals = a.GetGeneration() == b.GetGeneration()
+	} else {
+		versionEquals = a.GetResourceVersion() == b.GetResourceVersion()
+	}
+	return versionEquals && a.GetUID() == b.GetUID()
 }
 
 func (c PolicyWrapper) Equals(in PolicyWrapper) bool {
 	if c.ObjectSource != in.ObjectSource {
 		return false
 	}
-	var versionEquals bool
-	if c.Policy.GetGeneration() != 0 && in.Policy.GetGeneration() != 0 {
-		versionEquals = c.Policy.GetGeneration() == in.Policy.GetGeneration()
-	} else {
-		versionEquals = c.Policy.GetResourceVersion() == in.Policy.GetResourceVersion()
-	}
 
-	return versionEquals && c.Policy.GetUID() == in.Policy.GetUID()
+	return versionEquals(c.Policy, in.Policy)
 }
 
 var (

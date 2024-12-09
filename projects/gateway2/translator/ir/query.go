@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"istio.io/istio/pkg/kube/krt"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -14,9 +15,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	apiv1 "sigs.k8s.io/gateway-api/apis/v1"
-	apiv1alpha2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
+	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 	apiv1beta1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 
+	"github.com/solo-io/gloo/projects/gateway2/krtcollections"
+	"github.com/solo-io/gloo/projects/gateway2/model"
 	"github.com/solo-io/gloo/projects/gateway2/query"
 	"github.com/solo-io/gloo/projects/gateway2/wellknown"
 )
@@ -127,9 +130,13 @@ type GatewayQueries interface {
 	GetLocalObjRef(ctx context.Context, from From, localObjRef apiv1.LocalObjectReference) (client.Object, error)
 
 	// GetRoutesForGateway finds the top level xRoutes attached to the provided Gateway
-	GetRoutesForGateway(ctx context.Context, gw *apiv1.Gateway) (*RoutesForGwResult, error)
+	GetRoutesForGateway(kctx krt.HandlerContext, ctx context.Context, gw *apiv1.Gateway) (*RoutesForGwResult, error)
 	// GetRouteChain resolves backends and delegated routes for a the provided xRoute object
-	GetRouteChain(ctx context.Context, obj client.Object, hostnames []string, parentRef apiv1.ParentReference) *RouteInfo
+	GetRouteChain(kctx krt.HandlerContext,
+		ctx context.Context,
+		route model.Route,
+		hostnames []string,
+		parentRef gwv1.ParentReference) *RouteInfo
 
 	GetFlattenedRoutes(routeInfos []*RouteInfo)
 }
@@ -191,6 +198,7 @@ func NewRoutesForGwResult() *RoutesForGwResult {
 
 type gatewayQueries struct {
 	client                 client.Client
+	routes                 *krtcollections.RoutesIndex
 	scheme                 *runtime.Scheme
 	customBackendResolvers []BackendRefResolver
 }
@@ -224,26 +232,13 @@ func parentRefMatchListener(ref *apiv1.ParentReference, l *apiv1.Listener) bool 
 //
 //   - HTTPRoute
 //   - TCPRoute
-func getParentRefsForGw(gw *apiv1.Gateway, obj client.Object) []apiv1.ParentReference {
+func getParentRefsForGw(gw *apiv1.Gateway, obj model.Route) []apiv1.ParentReference {
 	var ret []apiv1.ParentReference
 
-	switch route := obj.(type) {
-	case *apiv1.HTTPRoute:
-		for _, pRef := range route.Spec.ParentRefs {
-			if isParentRefForGw(&pRef, gw, route.Namespace) {
-				ret = append(ret, pRef)
-			}
+	for _, pRef := range obj.GetParentRefs() {
+		if isParentRefForGw(&pRef, gw, obj.GetNamespace()) {
+			ret = append(ret, pRef)
 		}
-	case *apiv1alpha2.TCPRoute:
-		for _, pRef := range route.Spec.ParentRefs {
-			if isParentRefForGw(&pRef, gw, route.Namespace) {
-				ret = append(ret, pRef)
-			}
-		}
-	default:
-		// Unsupported route type
-		// TODO (danehans): Should we should capture this as a metric?
-		return ret
 	}
 
 	return ret
@@ -270,13 +265,13 @@ func isParentRefForGw(pRef *apiv1.ParentReference, gw *apiv1.Gateway, defaultNs 
 	return ns == gw.Namespace && string(pRef.Name) == gw.Name
 }
 
-func hostnameIntersect(l *apiv1.Listener, hr *apiv1.HTTPRoute) (bool, []string) {
+func hostnameIntersect(l *apiv1.Listener, routeHostnames []string) (bool, []string) {
 	var hostnames []string
-	if l == nil || hr == nil {
+	if l == nil || routeHostnames == nil {
 		return false, hostnames
 	}
 	if l.Hostname == nil {
-		for _, h := range hr.Spec.Hostnames {
+		for _, h := range routeHostnames {
 			hostnames = append(hostnames, string(h))
 		}
 		return true, hostnames
@@ -284,11 +279,11 @@ func hostnameIntersect(l *apiv1.Listener, hr *apiv1.HTTPRoute) (bool, []string) 
 	var listenerHostname string = string(*l.Hostname)
 
 	if strings.HasPrefix(listenerHostname, "*.") {
-		if hr.Spec.Hostnames == nil {
+		if routeHostnames == nil {
 			return true, []string{listenerHostname}
 		}
 
-		for _, hostname := range hr.Spec.Hostnames {
+		for _, hostname := range routeHostnames {
 			hrHost := string(hostname)
 			if strings.HasSuffix(hrHost, listenerHostname[1:]) {
 				hostnames = append(hostnames, hrHost)
@@ -296,10 +291,10 @@ func hostnameIntersect(l *apiv1.Listener, hr *apiv1.HTTPRoute) (bool, []string) 
 		}
 		return len(hostnames) > 0, hostnames
 	} else {
-		if len(hr.Spec.Hostnames) == 0 {
+		if len(routeHostnames) == 0 {
 			return true, []string{listenerHostname}
 		}
-		for _, hostname := range hr.Spec.Hostnames {
+		for _, hostname := range routeHostnames {
 			hrHost := string(hostname)
 			if hrHost == listenerHostname {
 				return true, []string{listenerHostname}

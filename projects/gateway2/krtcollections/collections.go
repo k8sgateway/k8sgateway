@@ -4,11 +4,13 @@ import (
 	"errors"
 
 	"github.com/solo-io/gloo/projects/gateway2/model"
+	"github.com/solo-io/gloo/projects/gateway2/translator/backendref"
 	"istio.io/istio/pkg/kube/krt"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gwv1a2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 	gwv1beta1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 )
 
@@ -141,20 +143,110 @@ func (r *RefGrantIndex) ReferenceAllowed(kctx krt.HandlerContext, fromgk metav1.
 	return false
 }
 
-type HttpRoutesIndex struct {
-	routes    krt.Collection[model.HttpRouteIR]
+type RouteWrapper struct {
+	Route model.Route
+}
+
+func (c RouteWrapper) ResourceName() string {
+	os := model.ObjectSource{
+		Group:     c.Route.GetGroupKind().Group,
+		Kind:      c.Route.GetGroupKind().Kind,
+		Namespace: c.Route.GetNamespace(),
+		Name:      c.Route.GetName(),
+	}
+	return os.ResourceName()
+}
+
+func (c RouteWrapper) Equals(in RouteWrapper) bool {
+	return c.ResourceName() == in.ResourceName() && versionEquals(c.Route.GetSourceObject(), in.Route.GetSourceObject())
+}
+func versionEquals(a, b metav1.Object) bool {
+	var versionEquals bool
+	if a.GetGeneration() != 0 && b.GetGeneration() != 0 {
+		versionEquals = a.GetGeneration() == b.GetGeneration()
+	} else {
+		versionEquals = a.GetResourceVersion() == b.GetResourceVersion()
+	}
+	return versionEquals && a.GetUID() == b.GetUID()
+}
+
+type RoutesIndex struct {
+	routes          krt.Collection[RouteWrapper]
+	httpRoutes      krt.Collection[model.HttpRouteIR]
+	httpByNamespace krt.Index[string, model.HttpRouteIR]
+	byTargetRef     krt.Index[types.NamespacedName, RouteWrapper]
+
 	policies  *PolicyIndex
 	refgrants *RefGrantIndex
 	upstreams *UpstreamIndex
 }
 
-func NewHttpRoutes(httproutes krt.Collection[*gwv1.HTTPRoute], policies *PolicyIndex, refgrants *RefGrantIndex) *HttpRoutesIndex {
-	h := &HttpRoutesIndex{policies: policies, refgrants: refgrants}
-	h.routes = krt.NewCollection(httproutes, h.transformRoute)
+func NewRoutes(httproutes krt.Collection[*gwv1.HTTPRoute], tcproutes krt.Collection[*gwv1a2.TCPRoute], policies *PolicyIndex, upstreams *UpstreamIndex, refgrants *RefGrantIndex) *RoutesIndex {
+
+	h := &RoutesIndex{policies: policies, refgrants: refgrants, upstreams: upstreams}
+	h.httpRoutes = krt.NewCollection(httproutes, h.transformHttpRoute)
+	hr := krt.NewCollection(h.httpRoutes, func(kctx krt.HandlerContext, i model.HttpRouteIR) *RouteWrapper {
+		return &RouteWrapper{Route: &i}
+	})
+	h.routes = krt.JoinCollection([]krt.Collection[RouteWrapper]{hr})
+
+	httpByNamespace := krt.NewIndex(h.httpRoutes, func(i model.HttpRouteIR) []string {
+		return []string{i.GetNamespace()}
+	})
+	byTargetRef := krt.NewIndex(h.routes, func(in RouteWrapper) []types.NamespacedName {
+		parentRefs := in.Route.GetParentRefs()
+		ret := make([]types.NamespacedName, len(parentRefs))
+		for i, pRef := range parentRefs {
+			ns := strOr(pRef.Namespace, "")
+			if ns == "" {
+				ns = in.Route.GetNamespace()
+			}
+			ret[i] = types.NamespacedName{Namespace: ns, Name: string(pRef.Name)}
+		}
+		return ret
+	})
+	h.httpByNamespace = httpByNamespace
+	h.byTargetRef = byTargetRef
+	panic("TODO: implement tcp routes")
 	return h
 }
 
-func (h *HttpRoutesIndex) transformRoute(kctx krt.HandlerContext, i *gwv1.HTTPRoute) *model.HttpRouteIR {
+func (h *RoutesIndex) ListHttp(kctx krt.HandlerContext, ns string) []model.HttpRouteIR {
+	return krt.Fetch(kctx, h.httpRoutes, krt.FilterIndex(h.httpByNamespace, ns))
+}
+
+func (h *RoutesIndex) RoutesForGateway(kctx krt.HandlerContext, nns types.NamespacedName) []model.Route {
+	rts := krt.Fetch(kctx, h.routes, krt.FilterIndex(h.byTargetRef, nns))
+	ret := make([]model.Route, len(rts))
+	for i, r := range rts {
+		ret[i] = r.Route
+	}
+	return ret
+}
+
+func (h *RoutesIndex) FetchHttp(kctx krt.HandlerContext, n, ns string) *model.HttpRouteIR {
+	// TODO: maybe the key shouldnt include g and k?
+	src := model.ObjectSource{
+		Group:     gwv1.SchemeGroupVersion.Group,
+		Kind:      "HTTPRoute",
+		Namespace: ns,
+		Name:      n,
+	}
+	return krt.FetchOne(kctx, h.httpRoutes, krt.FilterKey(src.ResourceName()))
+}
+
+func (h *RoutesIndex) Fetch(kctx krt.HandlerContext, gk schema.GroupKind, n, ns string) *RouteWrapper {
+	// TODO: maybe the key shouldnt include g and k?
+	src := model.ObjectSource{
+		Group:     gk.Group,
+		Kind:      gk.Kind,
+		Namespace: ns,
+		Name:      n,
+	}
+	return krt.FetchOne(kctx, h.routes, krt.FilterKey(src.ResourceName()))
+}
+
+func (h *RoutesIndex) transformHttpRoute(kctx krt.HandlerContext, i *gwv1.HTTPRoute) *model.HttpRouteIR {
 	src := model.ObjectSource{
 		Group:     gwv1.SchemeGroupVersion.Group,
 		Kind:      "HTTPRoute",
@@ -171,13 +263,9 @@ func (h *HttpRoutesIndex) transformRoute(kctx krt.HandlerContext, i *gwv1.HTTPRo
 		AttachedPolicies: toAttachedPolicies(h.policies.GetTargetingPolicies(kctx, src, "")),
 	}
 }
-func (h *HttpRoutesIndex) transformRules(kctx krt.HandlerContext, src model.ObjectSource, i []gwv1.HTTPRouteRule) []model.HttpRouteRuleIR {
+func (h *RoutesIndex) transformRules(kctx krt.HandlerContext, src model.ObjectSource, i []gwv1.HTTPRouteRule) []model.HttpRouteRuleIR {
 	rules := make([]model.HttpRouteRuleIR, 0, len(i))
-	for j, r := range i {
-		matches := r.Matches
-		if len(matches) == 0 {
-			matches = []gwv1.HTTPRouteMatch{{}}
-		}
+	for _, r := range i {
 
 		extensionRefs := h.getExtensionRefs(kctx, src.Namespace, r)
 		var policies model.AttachedPolicies
@@ -185,22 +273,21 @@ func (h *HttpRoutesIndex) transformRules(kctx krt.HandlerContext, src model.Obje
 			policies = toAttachedPolicies(h.policies.GetTargetingPolicies(kctx, src, string(*r.Name)))
 		}
 
-		for _, m := range matches {
-			rules = append(rules, model.HttpRouteRuleIR{
-				Match:            m,
-				MatchIndex:       j,
+		rules = append(rules, model.HttpRouteRuleIR{
+			HttpRouteRuleCommonIR: model.HttpRouteRuleCommonIR{
 				SourceRule:       &r,
-				Name:             emptyIfNil(r.Name),
 				ExtensionRefs:    extensionRefs,
 				AttachedPolicies: policies,
-				Backends:         h.getBackends(kctx, src, r.BackendRefs),
-			})
-		}
+			},
+			Backends: h.getBackends(kctx, src, r.BackendRefs),
+			Matches:  r.Matches,
+			Name:     emptyIfNil(r.Name),
+		})
 	}
 	return rules
 
 }
-func (h *HttpRoutesIndex) getExtensionRefs(kctx krt.HandlerContext, ns string, r gwv1.HTTPRouteRule) model.AttachedPolicies {
+func (h *RoutesIndex) getExtensionRefs(kctx krt.HandlerContext, ns string, r gwv1.HTTPRouteRule) model.AttachedPolicies {
 	ret := model.AttachedPolicies{
 		Policies: map[schema.GroupKind][]model.PolicyAtt{},
 	}
@@ -227,7 +314,7 @@ func (h *HttpRoutesIndex) getExtensionRefs(kctx krt.HandlerContext, ns string, r
 	}
 	return ret
 }
-func (h *HttpRoutesIndex) getExtensionRefs2(kctx krt.HandlerContext, ns string, r []gwv1.HTTPRouteFilter) model.AttachedPolicies {
+func (h *RoutesIndex) getExtensionRefs2(kctx krt.HandlerContext, ns string, r []gwv1.HTTPRouteFilter) model.AttachedPolicies {
 	ret := model.AttachedPolicies{
 		Policies: map[schema.GroupKind][]model.PolicyAtt{},
 	}
@@ -256,20 +343,30 @@ func (h *HttpRoutesIndex) getExtensionRefs2(kctx krt.HandlerContext, ns string, 
 	return ret
 }
 
-func (h *HttpRoutesIndex) getBackends(kctx krt.HandlerContext, src model.ObjectSource, i []gwv1.HTTPBackendRef) []model.HttpBackend {
-	backends := make([]model.HttpBackend, 0, len(i))
+func (h *RoutesIndex) getBackends(kctx krt.HandlerContext, src model.ObjectSource, i []gwv1.HTTPBackendRef) []model.HttpBackendOrDelegate {
+	backends := make([]model.HttpBackendOrDelegate, 0, len(i))
 	for _, ref := range i {
-		var upstream *model.Upstream
-		fromgk := metav1.GroupKind{
-			Group: src.Group,
-			Kind:  src.Kind,
-		}
+		extensionRefs := h.getExtensionRefs2(kctx, src.Namespace, ref.Filters)
 		fromns := src.Namespace
+
 		to := model.ObjectSource{
 			Group:     strOr(ref.BackendRef.Group, ""),
 			Kind:      strOr(ref.BackendRef.Kind, "Service"),
 			Namespace: strOr(ref.BackendRef.Namespace, fromns),
 			Name:      string(ref.BackendRef.Name),
+		}
+		if backendref.RefIsHTTPRoute(ref.BackendRef.BackendObjectReference) {
+			backends = append(backends, model.HttpBackendOrDelegate{
+				Delegate:         &to,
+				AttachedPolicies: extensionRefs,
+			})
+			continue
+		}
+
+		var upstream *model.Upstream
+		fromgk := metav1.GroupKind{
+			Group: src.Group,
+			Kind:  src.Kind,
 		}
 		var err error
 		if h.refgrants.ReferenceAllowed(kctx, fromgk, fromns, to) {
@@ -283,9 +380,8 @@ func (h *HttpRoutesIndex) getBackends(kctx krt.HandlerContext, src model.ObjectS
 			panic("TODO: figure out cluster name")
 			//			clusterName = model.UpstreamToClusterName(upstream)
 		}
-		extensionRefs := h.getExtensionRefs2(kctx, src.Namespace, ref.Filters)
-		backends = append(backends, model.HttpBackend{
-			Backend: model.Backend{
+		backends = append(backends, model.HttpBackendOrDelegate{
+			Backend: &model.Backend{
 				Upstream:    upstream,
 				ClusterName: clusterName,
 				Weight:      weight(ref.Weight),

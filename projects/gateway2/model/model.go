@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 type ObjectSource struct {
@@ -13,6 +14,23 @@ type ObjectSource struct {
 	Name      string `json:"name"`
 }
 
+// GetKind returns the kind of the route.
+func (c ObjectSource) GetGroupKind() schema.GroupKind {
+	return schema.GroupKind{
+		Group: c.Group,
+		Kind:  c.Kind,
+	}
+}
+
+// GetName returns the name of the route.
+func (c ObjectSource) GetName() string {
+	return c.Name
+}
+
+// GetNamespace returns the namespace of the route.
+func (c ObjectSource) GetNamespace() string {
+	return c.Namespace
+}
 func (c ObjectSource) ResourceName() string {
 	return fmt.Sprintf("%s/%s/%s/%s", c.Group, c.Kind, c.Namespace, c.Name)
 }

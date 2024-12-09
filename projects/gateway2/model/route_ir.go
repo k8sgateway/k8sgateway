@@ -48,22 +48,6 @@ func (c PolicyAtt) TargetRef() PolicyTargetRef {
 	return c.PolicyTargetRef
 }
 
-type HttpBackendPolicy interface {
-	markAdBackendPolicy()
-}
-
-type AttachableToHttpBackendPolicy struct{}
-
-func (AttachableToHttpBackendPolicy) markAdBackendPolicy() {}
-
-//type AttachedPolicies map[string]Policies
-
-// type NetworkPolicy AttachedPolicy
-// type HttpPolicy AttachedPolicy
-// type UpstreamPolicy AttachedPolicy
-
-// type ListenerPolicy AttachedPolicy
-
 type AttachedPolicies struct {
 	Policies map[schema.GroupKind][]PolicyAtt
 }
@@ -77,82 +61,95 @@ type Backend struct {
 	// if nil, error might say why
 	Err error
 }
+type Route interface {
+	GetGroupKind() schema.GroupKind
+	// GetName returns the name of the route.
+	GetName() string
+	// GetNamespace returns the namespace of the route.
+	GetNamespace() string
 
-/*
-(aws) upstream plugin:
-
-	ContributesPolicies map[GroupKind:"kgw/Parameters"]struct {
-		AttachmentPoints          []{BackendAttachmentPoint}
-		NewGatewayTranslationPass func(ctx context.Context, tctx GwTranslationCtx) ProxyTranslationPass{
-
-		ProcessBackend: func(ctx context.Context, Backend, RefPolicy) ProxyTranslationPass{
-			// check backend upstream to be aws
-			// check ref policy to be aws
-		}
-		Policies                  krt.Collection[model.Policy]
-		PoliciesFetch(name, namespace) Policy {return RefPolicy{...}}
-	}
-
-	ContributesUpstreams map[GroupKind:"kgw/Upstream"]struct {
-		ProcessUpstream: func(ctx context.Context, in model.Upstream, out *envoy_config_cluster_v3.Cluster){
-			ourUs, ok := in.Obj.(*kgw.Upstream)
-			if !ok {
-				// log - should never happen
-				return
-			}
-			if ourUs.aws != nil {
-				do stuff and update the cluster
-			}
-		}
-		Upstreams       krt.Collection[model.Upstream]
-		Endpoints       []krt.Collection[krtcollections.EndpointsForUpstream]
-	}
-	ContributesGwClasses map[string]translator.K8sGwTranslator
-*/
-type HttpBackend struct {
-	Backend
-	AttachedPolicies
+	GetParentRefs() []gwv1.ParentReference
+	GetSourceObject() client.Object
 }
 
+// this is 1:1 with httproute, and is a krt type
+// maybe move this to krtcollections package?
 type HttpRouteIR struct {
-	ObjectSource     `json:",inline"`
-	SourceObject     client.Object
-	ParentRefs       []gwv1.ParentReference
+	ObjectSource `json:",inline"`
+	SourceObject client.Object
+	ParentRefs   []gwv1.ParentReference
+
 	Hostnames        []string
 	AttachedPolicies AttachedPolicies
 	Rules            []HttpRouteRuleIR
 }
 
-// type HttpRouteRuleIR struct {
-// 	gwv1.HTTPRouteRule
-// 	Parent           HttpRouteIR
-// 	ExtensionRefs    AttachedPolicies
-// 	AttachedPolicies AttachedPolicies
-//
-// 	Backends []HttpBackend
-// }
-
-// TODO: this is the structure we probably want,
-// and maybe change name -- it's not a Rule, it's a Match
-type HttpRouteRuleIR struct {
-	Match            gwv1.HTTPRouteMatch
-	MatchIndex       int
-	Parent           *HttpRouteIR
-	SourceRule       *gwv1.HTTPRouteRule
-	Name             string
-	ExtensionRefs    AttachedPolicies
-	AttachedPolicies AttachedPolicies
-	Backends         []HttpBackend
+func (c *HttpRouteIR) GetParentRefs() []gwv1.ParentReference {
+	return c.ParentRefs
+}
+func (c *HttpRouteIR) GetSourceObject() client.Object {
+	return c.SourceObject
 }
 
-// TODO: temporary structure to represent an individual Match (equiv. to gloov1.Route)
-// need to remove in favor of commented out HttpRouteRuleIR above
-//type HttpRouteRuleMatchIR struct {
-//	Match    gwv1.HTTPRouteMatch
-//	Name     string // not sure if we actually need this anymore
-//	Parent   HttpRouteRuleIR
-//	Backends []HttpBackend
-//}
+var _ Route = &HttpRouteIR{}
+
+type TcpRouteIR struct {
+	ObjectSource     `json:",inline"`
+	SourceObject     client.Object
+	ParentRefs       []gwv1.ParentReference
+	AttachedPolicies AttachedPolicies
+	Backends         []Backend
+}
+
+func (c *TcpRouteIR) GetParentRefs() []gwv1.ParentReference {
+	return c.ParentRefs
+}
+func (c *TcpRouteIR) GetSourceObject() client.Object {
+	return c.SourceObject
+}
+
+var _ Route = &TcpRouteIR{}
+
+func (c HttpRouteIR) ResourceName() string {
+	return c.ObjectSource.ResourceName()
+}
+
+func (c HttpRouteIR) Equals(in HttpRouteIR) bool {
+	return c.ObjectSource == in.ObjectSource && versionEquals(c.SourceObject, in.SourceObject)
+}
+
+type HttpRouteRuleCommonIR struct {
+	Parent           *HttpRouteIR
+	SourceRule       *gwv1.HTTPRouteRule
+	ExtensionRefs    AttachedPolicies
+	AttachedPolicies AttachedPolicies
+}
+
+type HttpBackendOrDelegate struct {
+	Backend  *Backend
+	Delegate *ObjectSource
+	AttachedPolicies
+}
+
+type HttpBackend struct {
+	Backend Backend
+	AttachedPolicies
+}
+
+type HttpRouteRuleIR struct {
+	HttpRouteRuleCommonIR
+	Backends []HttpBackendOrDelegate
+	Matches  []gwv1.HTTPRouteMatch
+	Name     string
+}
+
+type HttpRouteRuleMatchIR struct {
+	HttpRouteRuleCommonIR
+	Backends   []HttpBackend
+	Match      gwv1.HTTPRouteMatch
+	MatchIndex int
+	Name       string
+}
 
 type ListenerIR struct {
 	Name             string
@@ -167,7 +164,7 @@ type ListenerIR struct {
 type VirtualHost struct {
 	Name      string
 	Hostnames []string
-	Rules     []HttpRouteRuleIR
+	Rules     []HttpRouteRuleMatchIR
 }
 
 type FilterChainMatch struct {
