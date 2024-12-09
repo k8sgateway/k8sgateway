@@ -8,7 +8,7 @@ import (
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
-	v1 "k8s.io/client-go/listers/core/v1"
+	v1 "k8s.io/client-go/listers/discovery/v1"
 )
 
 // MockKubePluginSharedFactory is a mock of KubePluginSharedFactory interface.
@@ -34,18 +34,18 @@ func (m *MockKubePluginSharedFactory) EXPECT() *MockKubePluginSharedFactoryMockR
 	return m.recorder
 }
 
-// EndpointsLister mocks base method.
-func (m *MockKubePluginSharedFactory) EndpointsLister(arg0 string) v1.EndpointsLister {
+// EndpointSliceLister mocks base method.
+func (m *MockKubePluginSharedFactory) EndpointSliceLister(arg0 string) v1.EndpointSliceLister {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "EndpointsLister", arg0)
-	ret0, _ := ret[0].(v1.EndpointsLister)
+	ret := m.ctrl.Call(m, "EndpointSliceLister", arg0)
+	ret0, _ := ret[0].(v1.EndpointSliceLister)
 	return ret0
 }
 
-// EndpointsLister indicates an expected call of EndpointsLister.
-func (mr *MockKubePluginSharedFactoryMockRecorder) EndpointsLister(arg0 interface{}) *gomock.Call {
+// EndpointSliceLister indicates an expected call of EndpointSliceLister.
+func (mr *MockKubePluginSharedFactoryMockRecorder) EndpointSliceLister(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EndpointsLister", reflect.TypeOf((*MockKubePluginSharedFactory)(nil).EndpointsLister), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EndpointSliceLister", reflect.TypeOf((*MockKubePluginSharedFactory)(nil).EndpointSliceLister), arg0)
 }
 
 // Subscribe mocks base method.
