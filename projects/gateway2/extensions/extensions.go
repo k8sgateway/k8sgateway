@@ -25,7 +25,7 @@ type K8sGatewayExtensions interface {
 
 	// GetTranslator allows an extension to provide custom translation for
 	// different gateway classes.
-	GetTranslator(context.Context, *apiv1.Gateway, registry.PluginRegistry) translator.K8sGwTranslator
+	GetTranslator(context.Context, *apiv1.Gateway, registry.PluginRegistry) any
 
 	KRTExtensions() krtcollections.KRTExtensions
 }
@@ -57,9 +57,10 @@ func NewK8sGatewayExtensions(
 	_ context.Context,
 	params K8sGatewayExtensionsFactoryParameters,
 ) (K8sGatewayExtensions, error) {
+	panic("TODO: fixme")
 	queries := query.NewData(
-		params.Mgr.GetClient(),
-		params.Mgr.GetScheme(),
+		nil, //	params.Mgr.GetClient(),
+		nil, //params.Mgr.GetScheme(),
 	)
 
 	return &k8sGatewayExtensions{
@@ -74,13 +75,13 @@ type k8sGatewayExtensions struct {
 	mgr            controllerruntime.Manager
 	collections    CoreCollections
 	statusReporter reporter.StatusReporter
-	translator     translator.K8sGwTranslator
+	translator     any
 	pluginRegistry registry.PluginRegistry
 	queries        query.GatewayQueries
 }
 
-func (e *k8sGatewayExtensions) GetTranslator(_ context.Context, _ *apiv1.Gateway, pluginRegistry registry.PluginRegistry) translator.K8sGwTranslator {
-	return translator.NewTranslator(e.queries, pluginRegistry)
+func (e *k8sGatewayExtensions) GetTranslator(_ context.Context, _ *apiv1.Gateway, pluginRegistry registry.PluginRegistry) any {
+	return translator.NewTranslator(e.queries)
 }
 
 func (e *k8sGatewayExtensions) CreatePluginRegistry(_ context.Context) registry.PluginRegistry {

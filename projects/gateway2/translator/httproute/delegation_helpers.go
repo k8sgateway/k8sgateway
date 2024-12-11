@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/solo-io/gloo/projects/gateway2/ir"
 	"github.com/solo-io/gloo/projects/gateway2/query"
 	"github.com/solo-io/gloo/projects/gateway2/wellknown"
 	"k8s.io/apimachinery/pkg/types"
@@ -47,10 +48,11 @@ func filterDelegatedChildren(
 		// make a copy; multiple parents can delegate to the same child so we can't modify a shared reference
 		clone := c.Clone()
 
-		child, ok := clone.Object.(*gwv1.HTTPRoute)
+		origChild, ok := clone.Object.(*ir.HttpRouteIR)
 		if !ok {
 			continue
 		}
+		child := &(*origChild)
 
 		inheritMatcher := shouldInheritMatcher(child)
 
@@ -61,8 +63,8 @@ func filterDelegatedChildren(
 		// (matches in the rule match the parent route matcher). If a specific rule
 		// in the child is not valid, then we discard it in the final child route
 		// returned by this function.
-		var validRules []gwv1.HTTPRouteRule
-		for i, rule := range child.Spec.Rules {
+		var validRules []ir.HttpRouteRuleIR
+		for i, rule := range child.Rules {
 			var validMatches []gwv1.HTTPRouteMatch
 
 			// If the child route opts to inherit the parent's matcher and it does not specify its own matcher,
@@ -78,7 +80,7 @@ func filterDelegatedChildren(
 					// the parent's matcher with the child's.
 					mergeParentChildRouteMatch(&parentMatch, &match)
 					validMatches = append(validMatches, match)
-				} else if ok := isDelegatedRouteMatch(parentMatch, parentRef, match, child.Namespace, child.Spec.ParentRefs); ok {
+				} else if ok := isDelegatedRouteMatch(parentMatch, parentRef, match, child.Namespace, child.ParentRefs); ok {
 					// Non-inherited matcher delegation requires matching child matcher to parent matcher
 					// to delegate from the parent route to the child.
 					validMatches = append(validMatches, match)
@@ -86,16 +88,16 @@ func filterDelegatedChildren(
 			}
 
 			// Matchers in this rule match the parent route matcher, so consider the valid matchers on the child,
-			child.Spec.Rules[i].Matches = validMatches
+			child.Rules[i].Matches = validMatches
 			// and discard rules on the child that do not match the parent route matcher.
 			if len(validMatches) > 0 {
-				validRule := child.Spec.Rules[i]
+				validRule := child.Rules[i]
 				validRule.Matches = validMatches
 				validRules = append(validRules, validRule)
 			}
 		}
 		if len(validRules) > 0 {
-			child.Spec.Rules = validRules
+			child.Rules = validRules
 			clone.Object = child
 			selected = append(selected, clone)
 		}
@@ -183,8 +185,8 @@ func isDelegatedRouteMatch(
 
 // shouldInheritMatcher returns true if the route indicates that it should inherit
 // its parent's matcher.
-func shouldInheritMatcher(route *gwv1.HTTPRoute) bool {
-	val, ok := route.Annotations[inheritMatcherAnnotation]
+func shouldInheritMatcher(route *ir.HttpRouteIR) bool {
+	val, ok := route.SourceObject.GetAnnotations()[inheritMatcherAnnotation]
 	if !ok {
 		return false
 	}

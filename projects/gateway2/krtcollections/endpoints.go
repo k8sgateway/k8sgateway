@@ -11,13 +11,13 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
+	"knative.dev/pkg/network"
 
+	"github.com/solo-io/gloo/projects/gateway2/ir"
 	ggv2utils "github.com/solo-io/gloo/projects/gateway2/utils"
+	"github.com/solo-io/gloo/projects/gateway2/utils/krtutil"
 	"github.com/solo-io/gloo/projects/gloo/constants"
-	v1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1"
 	glookubev1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1/kube/apis/gloo.solo.io/v1"
-	kubeplugin "github.com/solo-io/gloo/projects/gloo/pkg/api/v1/options/kubernetes"
-	"github.com/solo-io/gloo/projects/gloo/pkg/translator"
 	"github.com/solo-io/go-utils/contextutils"
 	"istio.io/istio/pkg/kube"
 	"istio.io/istio/pkg/kube/kclient"
@@ -49,33 +49,31 @@ func (p EndpointsSettings) ResourceName() string {
 }
 
 type EndpointsInputs struct {
-	Upstreams               krt.Collection[UpstreamWrapper]
+	// this is svc collection, other types will be ignored
+	Upstreams               krt.Collection[ir.Upstream]
 	EndpointSlices          krt.Collection[*discoveryv1.EndpointSlice]
 	EndpointSlicesByService krt.Index[types.NamespacedName, *discoveryv1.EndpointSlice]
 	Pods                    krt.Collection[LocalityPod]
 	EndpointsSettings       krt.Singleton[EndpointsSettings]
-	Services                krt.Collection[*corev1.Service]
 
-	Debugger *krt.DebugHandler
+	KrtOpts krtutil.KrtOptions
 }
 
 func NewGlooK8sEndpointInputs(
 	settings krt.Singleton[glookubev1.Settings],
 	istioClient kube.Client,
-	dbg *krt.DebugHandler,
+	krtopts krtutil.KrtOptions,
 	pods krt.Collection[LocalityPod],
-	services krt.Collection[*corev1.Service],
-	finalUpstreams krt.Collection[UpstreamWrapper],
+	k8supstreams krt.Collection[ir.Upstream],
 ) EndpointsInputs {
-	withDebug := krt.WithDebugging(dbg)
 	epSliceClient := kclient.New[*discoveryv1.EndpointSlice](istioClient)
-	endpointSlices := krt.WrapClient(epSliceClient, krt.WithName("EndpointSlices"), withDebug)
+	endpointSlices := krt.WrapClient(epSliceClient, krtopts.ToOptions("EndpointSlices")...)
 	endpointSettings := krt.NewSingleton(func(ctx krt.HandlerContext) *EndpointsSettings {
 		settings := krt.FetchOne(ctx, settings.AsCollection())
 		return &EndpointsSettings{
 			EnableAutoMtls: settings.Spec.GetGloo().GetIstioOptions().GetEnableAutoMtls().GetValue(),
 		}
-	}, withDebug)
+	}, krtopts.ToOptions("EndpointSettings")...)
 
 	// Create index on EndpointSlices by service name and endpointslice namespace
 	endpointSlicesByService := krt.NewIndex(endpointSlices, func(es *discoveryv1.EndpointSlice) []types.NamespacedName {
@@ -90,13 +88,12 @@ func NewGlooK8sEndpointInputs(
 	})
 
 	return EndpointsInputs{
-		Upstreams:               finalUpstreams,
+		Upstreams:               k8supstreams,
 		EndpointSlices:          endpointSlices,
 		EndpointSlicesByService: endpointSlicesByService,
 		Pods:                    pods,
 		EndpointsSettings:       endpointSettings,
-		Services:                services,
-		Debugger:                dbg,
+		KrtOpts:                 krtopts,
 	}
 }
 
@@ -123,7 +120,7 @@ type EndpointsForUpstream struct {
 	// Note - in theory, cluster name should be a function of the UpstreamRef.
 	// But due to an upstream envoy bug, the cluster name also includes the upstream hash.
 	ClusterName string
-	UpstreamRef types.NamespacedName
+	UpstreamRef ir.ObjectSource
 	Port        uint32
 	Hostname    string
 
@@ -132,29 +129,27 @@ type EndpointsForUpstream struct {
 	epsEqualityHash   uint64
 }
 
-func NewEndpointsForUpstream(us UpstreamWrapper, logger *zap.Logger) *EndpointsForUpstream {
+func NewEndpointsForUpstream(us ir.Upstream, svc *corev1.Service, logger *zap.Logger) *EndpointsForUpstream {
 	// start with a hash of the cluster name. technically we dont need it for krt, as we can compare the upstream name. but it helps later
 	// to compute the hash we present envoy with.
 	// add the upstream hash to the clustername, so that if it changes the envoy cluster will become warm again.
-	clusterName := GetEndpointClusterName(us.Inner)
 
-	h := fnv.New64()
-	h.Write([]byte(us.Inner.GetMetadata().Ref().String()))
-	// As long as we hash the upstream in the cluster name (due to envoy cluster warming bug), we
-	// also need to include that in the hash
-	// see: https://github.com/envoyproxy/envoy/issues/13009
-	h.Write([]byte(clusterName))
+	h := fnv.New64a()
+	h.Write([]byte(us.Group))
+	h.Write([]byte{0})
+	h.Write([]byte(us.Kind))
+	h.Write([]byte{0})
+	h.Write([]byte(us.Name))
+	h.Write([]byte{0})
+	h.Write([]byte(us.Namespace))
 	upstreamHash := h.Sum64()
 
 	return &EndpointsForUpstream{
-		LbEps:       make(map[PodLocality][]EndpointWithMd),
-		ClusterName: clusterName,
-		UpstreamRef: types.NamespacedName{
-			Namespace: us.Inner.GetMetadata().GetNamespace(),
-			Name:      us.Inner.GetMetadata().GetName(),
-		},
-		Port:              ggv2utils.GetPortForUpstream(us.Inner),
-		Hostname:          ggv2utils.GetHostnameForUpstream(us.Inner),
+		LbEps:             make(map[PodLocality][]EndpointWithMd),
+		ClusterName:       us.ClusterName(),
+		UpstreamRef:       us.ObjectSource,
+		Port:              uint32(us.Port),
+		Hostname:          network.GetServiceHostname(svc.Name, svc.Namespace),
 		LbEpsEqualityHash: upstreamHash,
 		upstreamHash:      upstreamHash,
 	}
@@ -192,7 +187,7 @@ func (e *EndpointsForUpstream) Add(l PodLocality, emd EndpointWithMd) {
 }
 
 func (c EndpointsForUpstream) ResourceName() string {
-	return c.UpstreamRef.String()
+	return c.UpstreamRef.ResourceName()
 }
 
 func (c EndpointsForUpstream) Equals(in EndpointsForUpstream) bool {
@@ -200,44 +195,43 @@ func (c EndpointsForUpstream) Equals(in EndpointsForUpstream) bool {
 }
 
 func NewGlooK8sEndpoints(ctx context.Context, inputs EndpointsInputs) krt.Collection[EndpointsForUpstream] {
-	return krt.NewCollection(inputs.Upstreams, transformK8sEndpoints(ctx, inputs), krt.WithName("GlooK8sEndpoints"), krt.WithDebugging(inputs.Debugger))
+	return krt.NewCollection(inputs.Upstreams, transformK8sEndpoints(ctx, inputs), inputs.KrtOpts.ToOptions("GlooK8sEndpoints")...)
 }
 
-func transformK8sEndpoints(ctx context.Context, inputs EndpointsInputs) func(kctx krt.HandlerContext, us UpstreamWrapper) *EndpointsForUpstream {
+func transformK8sEndpoints(ctx context.Context, inputs EndpointsInputs) func(kctx krt.HandlerContext, us ir.Upstream) *EndpointsForUpstream {
 	augmentedPods := inputs.Pods
-	svcs := inputs.Services
 
 	logger := contextutils.LoggerFrom(ctx).Desugar()
 
-	return func(kctx krt.HandlerContext, us UpstreamWrapper) *EndpointsForUpstream {
+	return func(kctx krt.HandlerContext, us ir.Upstream) *EndpointsForUpstream {
 		var warnsToLog []string
 		defer func() {
 			for _, warn := range warnsToLog {
 				logger.Warn(warn)
 			}
 		}()
-		logger := logger.With(zap.String("upstream", us.Inner.GetMetadata().Ref().Key()))
+		key := types.NamespacedName{
+			Namespace: us.Namespace,
+			Name:      us.Name,
+		}
+		logger := logger.With(zap.Stringer("kubesvc", key))
 
-		logger.Debug("building endpoints")
-
-		kubeUpstream, ok := us.Inner.GetUpstreamType().(*v1.Upstream_Kube)
+		kubeUpstream, ok := us.Obj.(*corev1.Service)
 		// only care about kube upstreams
 		if !ok {
 			logger.Debug("not kube upstream")
 			return nil
 		}
-		spec := kubeUpstream.Kube
-		kubeSvcPort, singlePortSvc := findPortForService(kctx, svcs, spec)
+
+		logger.Debug("building endpoints")
+
+		kubeSvcPort, singlePortSvc := findPortForService(kubeUpstream, uint32(us.Port))
 		if kubeSvcPort == nil {
-			logger.Debug("port not found for service", zap.Uint32("port", spec.GetServicePort()), zap.String("name", spec.GetServiceName()), zap.String("namespace", spec.GetServiceNamespace()))
+			logger.Debug("port not found for service", zap.Uint32("port", uint32(us.Port)))
 			return nil
 		}
 
 		// Fetch all EndpointSlices for the upstream service
-		key := types.NamespacedName{
-			Namespace: spec.GetServiceNamespace(),
-			Name:      spec.GetServiceName(),
-		}
 
 		endpointSlices := krt.Fetch(kctx, inputs.EndpointSlices, krt.FilterIndex(inputs.EndpointSlicesByService, key))
 		if len(endpointSlices) == 0 {
@@ -261,7 +255,7 @@ func transformK8sEndpoints(ctx context.Context, inputs EndpointsInputs) func(kct
 		// Initialize the returned EndpointsForUpstream
 		settings := krt.FetchOne(kctx, inputs.EndpointsSettings.AsCollection())
 		enableAutoMtls := settings.EnableAutoMtls
-		ret := NewEndpointsForUpstream(us, logger)
+		ret := NewEndpointsForUpstream(us, kubeUpstream, logger)
 
 		// Handle deduplication of endpoint addresses
 		seenAddresses := make(map[string]struct{})
@@ -383,19 +377,9 @@ func addIstioAutomtlsMetadata(metadata *envoy_config_core_v3.Metadata, labels ma
 	return metadata
 }
 
-func findPortForService(kctx krt.HandlerContext, services krt.Collection[*corev1.Service], spec *kubeplugin.UpstreamSpec) (*corev1.ServicePort, bool) {
-	maybeSvc := krt.FetchOne(kctx, services, krt.FilterObjectName(types.NamespacedName{
-		Namespace: spec.GetServiceNamespace(),
-		Name:      spec.GetServiceName(),
-	}))
-	if maybeSvc == nil {
-		return nil, false
-	}
-
-	svc := *maybeSvc
-
+func findPortForService(svc *corev1.Service, svcPort uint32) (*corev1.ServicePort, bool) {
 	for _, port := range svc.Spec.Ports {
-		if spec.GetServicePort() == uint32(port.Port) {
+		if svcPort == uint32(port.Port) {
 			return &port, len(svc.Spec.Ports) == 1
 		}
 	}
@@ -425,14 +409,4 @@ func findPortInEndpointSlice(endpointSlice *discoveryv1.EndpointSlice, singlePor
 		}
 	}
 	return port
-}
-
-// TODO: use exported version from translator?
-func GetEndpointClusterName(upstream *v1.Upstream) string {
-	clusterName := translator.UpstreamToClusterName(upstream.GetMetadata().Ref())
-	endpointClusterName, err := translator.GetEndpointClusterName(clusterName, upstream)
-	if err != nil {
-		panic(err)
-	}
-	return endpointClusterName
 }
