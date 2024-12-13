@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/solo-io/gloo/projects/gloo/constants"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
@@ -111,32 +112,37 @@ var _ = Describe("Eds", func() {
 				},
 			}
 
+			port := int32(9090)
+			portName := "http"
+			portProtocol := corev1.ProtocolTCP
+			trueVal := true
+
 			endpoints, warnsToLog, errorsToLog := FilterEndpoints(ctx, // do not use for logging! return logging messages as strings and log them after hashing (see https://github.com/solo-io/gloo/issues/3761)
 				writeNamespace,
-				[]*corev1.Endpoints{
+				[]*discoveryv1.EndpointSlice{
 					{
 						ObjectMeta: metav1.ObjectMeta{
-							Name:      "bar",
+							Name:      "bar-eps-1",
 							Namespace: "foo",
+							Labels:    map[string]string{"kubernetes.io/service-name": "bar"},
 						},
-						Subsets: []corev1.EndpointSubset{
+						Ports: []discoveryv1.EndpointPort{
 							{
-								Ports: []corev1.EndpointPort{
-									{
-										Port:     9080,
-										Name:     "http",
-										Protocol: "TCP",
-									},
+								Port:     &port,
+								Name:     &portName,
+								Protocol: &portProtocol,
+							},
+						},
+						Endpoints: []discoveryv1.Endpoint{
+							{
+								Addresses: []string{"10.244.0.14"},
+								TargetRef: &corev1.ObjectReference{
+									Kind:      "Pod",
+									Name:      "bar-7d4d7c7b4b-4z5zv",
+									Namespace: "foo",
 								},
-								Addresses: []corev1.EndpointAddress{
-									{
-										IP: "10.244.0.14",
-										TargetRef: &corev1.ObjectReference{
-											Kind:      "Pod",
-											Name:      "bar-7d4d7c7b4b-4z5zv",
-											Namespace: "foo",
-										},
-									},
+								Conditions: discoveryv1.EndpointConditions{
+									Ready: &trueVal,
 								},
 							},
 						},
