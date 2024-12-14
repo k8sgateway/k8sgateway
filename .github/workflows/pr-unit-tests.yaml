@@ -47,3 +47,10 @@ jobs:
       # We intentionally ignore the errors while we build out our test coverage, to establish a good baseline
       # However, we should strive to establish a baseline, and then make it required on PRs
       run: make --always-make --ignore-errors validate-test-coverage
+    - name: Emit metrics for results in JUnit XML
+      shell: bash
+      run: |
+        cat _output/junit.xml | docker run --rm -i --volume "${{ github.workspace }}:/opt/projectname" \
+          --env OTEL_EXPORTER_OTLP_ENDPOINT=https://test-metrics-otel-collector-54kqckfreq-ul.a.run.app:443 \
+          --env TARGET_BRANCH=main --env BRANCH=main \
+          mdelapenya/junit2otlp:latest --repository-path "/opt/projectname" \
