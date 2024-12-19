@@ -1,7 +1,7 @@
 package query
 
 import (
-	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
+	"github.com/solo-io/gloo/projects/gateway2/ir"
 )
 
 // BackendMap is a generic type used to manage mappings of backends for Gateway API configurations.
@@ -21,13 +21,13 @@ func NewBackendMap[T any]() BackendMap[T] {
 
 type backendRefKey string
 
-func backendToRefKey(ref gwv1.BackendObjectReference) backendRefKey {
+func backendToRefKey(ref ir.ObjectSource) backendRefKey {
 	const delim = "~"
 	return backendRefKey(
-		string(ptrOrDefault(ref.Group, "")) + delim +
-			string(ptrOrDefault(ref.Kind, "Service")) + delim +
-			string(ref.Name) + delim +
-			string(ptrOrDefault(ref.Namespace, "")),
+		ref.Group + delim +
+			ref.Kind + delim +
+			ref.Name + delim +
+			ref.Namespace,
 	)
 }
 
@@ -38,17 +38,17 @@ func ptrOrDefault[T comparable](p *T, fallback T) T {
 	return *p
 }
 
-func (bm BackendMap[T]) Add(backendRef gwv1.BackendObjectReference, value T) {
+func (bm BackendMap[T]) Add(backendRef ir.ObjectSource, value T) {
 	key := backendToRefKey(backendRef)
 	bm.items[key] = value
 }
 
-func (bm BackendMap[T]) AddError(backendRef gwv1.BackendObjectReference, err error) {
+func (bm BackendMap[T]) AddError(backendRef ir.ObjectSource, err error) {
 	key := backendToRefKey(backendRef)
 	bm.errors[key] = err
 }
 
-func (bm BackendMap[T]) get(backendRef gwv1.BackendObjectReference, def T) (T, error) {
+func (bm BackendMap[T]) get(backendRef ir.ObjectSource, def T) (T, error) {
 	key := backendToRefKey(backendRef)
 	if err, ok := bm.errors[key]; ok {
 		return def, err

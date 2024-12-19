@@ -133,7 +133,7 @@ var _ = Describe("Deployer", func() {
 				Spec: api.GatewayClassSpec{
 					ControllerName: wellknown.GatewayControllerName,
 					ParametersRef: &api.ParametersReference{
-						Group:     gw2_v1alpha1.Group,
+						Group:     gw2_v1alpha1.GroupName,
 						Kind:      gw2_v1alpha1.GatewayParametersKind,
 						Name:      wellknown.DefaultGatewayParametersName,
 						Namespace: ptr.To(api.Namespace(defaultNamespace)),
@@ -270,7 +270,7 @@ var _ = Describe("Deployer", func() {
 				Spec: api.GatewayClassSpec{
 					ControllerName: wellknown.GatewayControllerName,
 					ParametersRef: &api.ParametersReference{
-						Group:     gw2_v1alpha1.Group,
+						Group:     gw2_v1alpha1.GroupName,
 						Kind:      gw2_v1alpha1.GatewayParametersKind,
 						Name:      wellknown.DefaultGatewayParametersName,
 						Namespace: ptr.To(api.Namespace(defaultNamespace)),
@@ -720,7 +720,7 @@ var _ = Describe("Deployer", func() {
 									Repository: ptr.To("bar"),
 									Tag:        ptr.To("baz"),
 								},
-								Ports: []*corev1.ContainerPort{
+								Ports: []corev1.ContainerPort{
 									{
 										Name:          "foo",
 										ContainerPort: 80,
@@ -1328,9 +1328,8 @@ var _ = Describe("Deployer", func() {
 
 					// make sure the envoy node metadata looks right
 					node := envoyConfig["node"].(map[string]any)
-					proxyName := fmt.Sprintf("%s-%s", gw.Namespace, gw.Name)
 					Expect(node).To(HaveKeyWithValue("metadata", map[string]any{
-						xds.RoleKey: fmt.Sprintf("%s~%s~%s", glooutils.GatewayApiProxyValue, gw.Namespace, proxyName),
+						xds.RoleKey: fmt.Sprintf("%s~%s~%s", glooutils.GatewayApiProxyValue, gw.Namespace, gw.Name),
 					}))
 
 					// make sure the stats listener is enabled
@@ -1374,9 +1373,8 @@ var _ = Describe("Deployer", func() {
 
 					// make sure the envoy node metadata looks right
 					node := envoyConfig["node"].(map[string]any)
-					proxyName := fmt.Sprintf("%s-%s", gw.Namespace, gw.Name)
 					Expect(node).To(HaveKeyWithValue("metadata", map[string]any{
-						xds.RoleKey: fmt.Sprintf("%s~%s~%s", glooutils.GatewayApiProxyValue, gw.Namespace, proxyName),
+						xds.RoleKey: fmt.Sprintf("%s~%s~%s", glooutils.GatewayApiProxyValue, gw.Namespace, gw.Name),
 					}))
 
 					// make sure the stats listener is enabled
@@ -1535,7 +1533,7 @@ func fullyDefinedGatewayParameters(name, namespace string) *gw2_v1alpha1.Gateway
 							},
 						},
 					},
-					Tolerations: []*corev1.Toleration{{
+					Tolerations: []corev1.Toleration{{
 						Key:               "pod-toleration-key",
 						Operator:          "pod-toleration-operator",
 						Value:             "pod-toleration-value",
@@ -1585,7 +1583,7 @@ func fullyDefinedGatewayParameters(name, namespace string) *gw2_v1alpha1.Gateway
 				},
 				AiExtension: &gw2_v1alpha1.AiExtension{
 					Enabled: ptr.To(true),
-					Ports: []*corev1.ContainerPort{
+					Ports: []corev1.ContainerPort{
 						{
 							Name:          "foo",
 							ContainerPort: 80,

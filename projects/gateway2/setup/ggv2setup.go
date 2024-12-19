@@ -12,17 +12,13 @@ import (
 	gloostatusutils "github.com/solo-io/gloo/pkg/utils/statusutils"
 	gateway "github.com/solo-io/gloo/projects/gateway/pkg/api/v1"
 	"github.com/solo-io/gloo/projects/gateway2/controller"
-	"github.com/solo-io/gloo/projects/gateway2/extensions"
+	extensionsplug "github.com/solo-io/gloo/projects/gateway2/extensions2/plugin"
 	"github.com/solo-io/gloo/projects/gateway2/krtcollections"
-	"github.com/solo-io/gloo/projects/gateway2/proxy_syncer"
-	"github.com/solo-io/gloo/projects/gloo/constants"
+	"github.com/solo-io/gloo/projects/gateway2/utils/krtutil"
 	gloov1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1"
 	glookubev1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1/kube/apis/gloo.solo.io/v1"
 	"github.com/solo-io/gloo/projects/gloo/pkg/bootstrap"
 	"github.com/solo-io/gloo/projects/gloo/pkg/defaults"
-	"github.com/solo-io/gloo/projects/gloo/pkg/plugins"
-	"github.com/solo-io/gloo/projects/gloo/pkg/plugins/registry"
-	"github.com/solo-io/gloo/projects/gloo/pkg/syncer/setup"
 	"github.com/solo-io/gloo/projects/gloo/pkg/upstreams/kubernetes"
 	"github.com/solo-io/go-utils/contextutils"
 	"github.com/solo-io/solo-kit/pkg/api/shared"
@@ -31,9 +27,7 @@ import (
 	"github.com/solo-io/solo-kit/pkg/api/v1/resources/core"
 	"github.com/solo-io/solo-kit/pkg/api/v2/reporter"
 	istiokube "istio.io/istio/pkg/kube"
-	"istio.io/istio/pkg/kube/kclient"
 	"istio.io/istio/pkg/kube/krt"
-	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -79,20 +73,18 @@ func getInitialSettings(ctx context.Context, c istiokube.Client, nns types.Names
 func StartGGv2(ctx context.Context,
 	setupOpts *bootstrap.SetupOpts,
 	uccBuilder krtcollections.UniquelyConnectedClientsBulider,
-	extensionsFactory extensions.K8sGatewayExtensionsFactory,
-	pluginRegistryFactory func(opts registry.PluginOpts) plugins.PluginRegistryFactory,
+	extraPlugins []extensionsplug.Plugin,
 ) error {
 	restConfig := ctrl.GetConfigOrDie()
 
-	return StartGGv2WithConfig(ctx, setupOpts, restConfig, uccBuilder, extensionsFactory, pluginRegistryFactory, setuputils.SetupNamespaceName())
+	return StartGGv2WithConfig(ctx, setupOpts, restConfig, uccBuilder, extraPlugins, setuputils.SetupNamespaceName())
 }
 
 func StartGGv2WithConfig(ctx context.Context,
 	setupOpts *bootstrap.SetupOpts,
 	restConfig *rest.Config,
 	uccBuilder krtcollections.UniquelyConnectedClientsBulider,
-	extensionsFactory extensions.K8sGatewayExtensionsFactory,
-	pluginRegistryFactory func(opts registry.PluginOpts) plugins.PluginRegistryFactory,
+	extraPlugins []extensionsplug.Plugin,
 	settingsNns types.NamespacedName,
 ) error {
 	ctx = contextutils.WithLogger(ctx, "k8s")
@@ -112,7 +104,7 @@ func StartGGv2WithConfig(ctx context.Context,
 
 	logger.Info("creating krt collections")
 	augmentedPods := krtcollections.NewPodsCollection(ctx, kubeClient, setupOpts.KrtDebugger)
-	setting := proxy_syncer.SetupCollectionDynamic[glookubev1.Settings](
+	setting := krtutil.SetupCollectionDynamic[glookubev1.Settings](
 		ctx,
 		kubeClient,
 		settingsGVR,
@@ -134,25 +126,20 @@ func StartGGv2WithConfig(ctx context.Context,
 		return nil
 	}, krt.WithName("GlooSettingsSingleton"))
 
-	serviceClient := kclient.New[*corev1.Service](kubeClient)
-	services := krt.WrapClient(serviceClient, krt.WithName("Services"))
-
 	logger.Info("creating reporter")
 	kubeGwStatusReporter := NewGenericStatusReporter(kubeClient, defaults.KubeGatewayReporter)
 
 	glooReporter := NewGenericStatusReporter(kubeClient, defaults.GlooReporter)
-	pluginOpts := registry.PluginOpts{
-		Ctx:                     ctx,
-		SidecarOnGatewayEnabled: envutils.IsEnvTruthy(constants.IstioInjectionEnabled),
-		SvcCollection:           services,
-	}
+
 	logger.Info("initializing controller")
+
+	krtOpts := krtutil.NewKrtOptions(ctx.Done(), setupOpts.KrtDebugger)
+
 	c, err := controller.NewControllerBuilder(ctx, controller.StartConfig{
-		ExtensionsFactory:    extensionsFactory,
+		ExtraPlugins:         extraPlugins,
 		RestConfig:           restConfig,
 		SetupOpts:            setupOpts,
 		KubeGwStatusReporter: kubeGwStatusReporter,
-		Translator:           setup.TranslatorFactory{PluginRegistry: pluginRegistryFactory(pluginOpts)},
 		GlooStatusReporter:   glooReporter,
 		Client:               kubeClient,
 		AugmentedPods:        augmentedPods,
@@ -161,8 +148,8 @@ func StartGGv2WithConfig(ctx context.Context,
 		InitialSettings: initialSettings,
 		Settings:        settingsSingle,
 		// Dev flag may be useful for development purposes; not currently tied to any user-facing API
-		Dev:      false,
-		Debugger: setupOpts.KrtDebugger,
+		Dev:        false,
+		KrtOptions: krtOpts,
 	})
 	if err != nil {
 		logger.Error("failed initializing controller: ", err)

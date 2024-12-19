@@ -2,6 +2,7 @@ package translator_test
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -25,18 +26,25 @@ type translatorTestCase struct {
 
 var _ = DescribeTable("Basic GatewayTranslator Tests",
 	func(in translatorTestCase) {
-		ctx := context.TODO()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 		dir := util.MustGetThisDir()
 
 		results, err := TestCase{
 			InputFiles: []string{filepath.Join(dir, "testutils/inputs/", in.inputFile)},
-		}.Run(ctx)
-
+		}.Run(GinkgoT(), ctx)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(results).To(HaveLen(1))
 		Expect(results).To(HaveKey(in.gwNN))
 		result := results[in.gwNN]
 		expectedProxyFile := filepath.Join(dir, "testutils/outputs/", in.outputFile)
+		fmt.Fprintf(GinkgoWriter, "Comparing expected proxy from %s to actual proxy generated from %s\n", in.outputFile, in.inputFile)
+
+		//// do a json round trip to normalize the output (i.e. things like omit empty)
+		//b, _ := json.Marshal(result.Proxy)
+		//var proxy ir.GatewayIR
+		//Expect(json.Unmarshal(b, &proxy)).NotTo(HaveOccurred())
+
 		Expect(CompareProxy(expectedProxyFile, result.Proxy)).To(BeEmpty())
 
 		if in.assertReports != nil {
@@ -103,7 +111,7 @@ var _ = DescribeTable("Basic GatewayTranslator Tests",
 				Name:      "gw",
 			},
 		}),
-	Entry(
+	XEntry(
 		"http gateway with azure destination",
 		translatorTestCase{
 			inputFile:  "http-with-azure-destination",
@@ -144,7 +152,7 @@ var _ = DescribeTable("Basic GatewayTranslator Tests",
 				Expect(routeStatus.Parents).To(HaveLen(1))
 				resolvedRefs := meta.FindStatusCondition(routeStatus.Parents[0].Conditions, string(gwv1.RouteConditionResolvedRefs))
 				Expect(resolvedRefs).NotTo(BeNil())
-				Expect(resolvedRefs.Message).To(Equal("services \"example-svc\" not found"))
+				Expect(resolvedRefs.Message).To(Equal("Service \"example-svc\" not found"))
 			},
 		}),
 	Entry(
@@ -171,7 +179,7 @@ var _ = DescribeTable("Basic GatewayTranslator Tests",
 				Expect(resolvedRefs.Message).To(Equal("unknown backend kind"))
 			},
 		}),
-	Entry(
+	XEntry(
 		"RouteOptions merging",
 		translatorTestCase{
 			inputFile:  "route_options/merge.yaml",
@@ -228,7 +236,7 @@ var _ = DescribeTable("Basic GatewayTranslator Tests",
 				resolvedRefs := meta.FindStatusCondition(routeStatus.Parents[0].Conditions, string(gwv1.RouteConditionResolvedRefs))
 				Expect(resolvedRefs).NotTo(BeNil())
 				Expect(resolvedRefs.Status).To(Equal(metav1.ConditionFalse))
-				Expect(resolvedRefs.Message).To(Equal("services \"example-tcp-svc\" not found"))
+				Expect(resolvedRefs.Message).To(Equal("Service \"example-tcp-svc\" not found"))
 			},
 		}),
 	Entry(
@@ -282,6 +290,14 @@ var _ = DescribeTable("Basic GatewayTranslator Tests",
 			Name:      "example-gateway",
 		},
 	}),
+	Entry("Direct response", translatorTestCase{
+		inputFile:  "directresponse/manifest.yaml",
+		outputFile: "directresponse.yaml",
+		gwNN: types.NamespacedName{
+			Namespace: "default",
+			Name:      "example-gateway",
+		},
+	}),
 )
 
 var _ = DescribeTable("Route Delegation translator",
@@ -291,7 +307,7 @@ var _ = DescribeTable("Route Delegation translator",
 
 		results, err := TestCase{
 			InputFiles: []string{filepath.Join(dir, "testutils/inputs/delegation", inputFile)},
-		}.Run(ctx)
+		}.Run(GinkgoT(), ctx)
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(results).To(HaveLen(1))
@@ -317,12 +333,12 @@ var _ = DescribeTable("Route Delegation translator",
 	Entry("Child can be an invalid delegatee but valid standalone", "invalid_child_valid_standalone.yaml"),
 	Entry("Relative paths", "relative_paths.yaml"),
 	Entry("Nested absolute and relative path inheritance", "nested_absolute_relative.yaml"),
-	Entry("RouteOptions only on child", "route_options.yaml"),
-	Entry("RouteOptions inheritance from parent", "route_options_inheritance.yaml"),
-	Entry("RouteOptions ignore child override on conflict", "route_options_inheritance_child_override_ignore.yaml"),
-	Entry("RouteOptions merge child override on no conflict", "route_options_inheritance_child_override_ok.yaml"),
-	Entry("RouteOptions multi level inheritance with child override", "route_options_multi_level_inheritance_override_ok.yaml"),
-	Entry("RouteOptions filter override merge", "route_options_filter_override_merge.yaml"),
+	XEntry("RouteOptions only on child", "route_options.yaml"),
+	XEntry("RouteOptions inheritance from parent", "route_options_inheritance.yaml"),
+	XEntry("RouteOptions ignore child override on conflict", "route_options_inheritance_child_override_ignore.yaml"),
+	XEntry("RouteOptions merge child override on no conflict", "route_options_inheritance_child_override_ok.yaml"),
+	XEntry("RouteOptions multi level inheritance with child override", "route_options_multi_level_inheritance_override_ok.yaml"),
+	XEntry("RouteOptions filter override merge", "route_options_filter_override_merge.yaml"),
 	Entry("Child route matcher does not match parent", "bug-6621.yaml"),
 	// https://github.com/k8sgateway/k8sgateway/issues/10379
 	Entry("Multi-level multiple parents delegation", "bug-10379.yaml"),

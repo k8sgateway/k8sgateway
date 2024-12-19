@@ -2,70 +2,52 @@ package translator
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/solo-io/gloo/pkg/utils/statsutils"
-	"github.com/solo-io/gloo/projects/gateway2/translator/plugins/registry"
+	extensionsplug "github.com/solo-io/gloo/projects/gateway2/extensions2/plugin"
+	"github.com/solo-io/gloo/projects/gateway2/ir"
 	"github.com/solo-io/go-utils/contextutils"
+	"istio.io/istio/pkg/kube/krt"
 
 	"github.com/solo-io/gloo/projects/gateway2/query"
 	"github.com/solo-io/gloo/projects/gateway2/reports"
 	"github.com/solo-io/gloo/projects/gateway2/translator/listener"
-	v1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1"
-	"github.com/solo-io/gloo/projects/gloo/pkg/utils"
-	"github.com/solo-io/solo-kit/pkg/api/v1/resources/core"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
-// K8sGwTranslator This translator Translates K8s Gateway resources into Gloo Edge Proxies.
-type K8sGwTranslator interface {
-	// TranslateProxy This function is called by the reconciler when a K8s Gateway resource is created or updated.
-	// It returns an instance of the Gloo Edge Proxy resource, that should configure a target Gloo Edge Proxy workload.
-	// A null return value indicates the K8s Gateway resource failed to translate into a Gloo Edge Proxy. The error will be reported on the provided reporter.
-	TranslateProxy(
-		ctx context.Context,
-		gateway *gwv1.Gateway,
-		writeNamespace string,
-		reporter reports.Reporter,
-	) *v1.Proxy
-}
-
-func NewTranslator(queries query.GatewayQueries, pluginRegistry registry.PluginRegistry) K8sGwTranslator {
+func NewTranslator(queries query.GatewayQueries) extensionsplug.K8sGwTranslator {
 	return &translator{
-		pluginRegistry: pluginRegistry,
-		queries:        queries,
+		queries: queries,
 	}
 }
 
 type translator struct {
-	pluginRegistry registry.PluginRegistry
-	queries        query.GatewayQueries
+	queries query.GatewayQueries
 }
 
-func (t *translator) TranslateProxy(
+func (t *translator) Translate(
+	kctx krt.HandlerContext,
 	ctx context.Context,
-	gateway *gwv1.Gateway,
-	writeNamespace string,
+	gateway *ir.Gateway,
 	reporter reports.Reporter,
-) *v1.Proxy {
+) *ir.GatewayIR {
 	stopwatch := statsutils.NewTranslatorStopWatch("TranslateProxy")
 	stopwatch.Start()
 	defer stopwatch.Stop(ctx)
 
 	ctx = contextutils.WithLogger(ctx, "k8s-gateway-translator")
 	logger := contextutils.LoggerFrom(ctx)
-	routesForGw, err := t.queries.GetRoutesForGateway(ctx, gateway)
+	routesForGw, err := t.queries.GetRoutesForGateway(kctx, ctx, gateway.Obj)
 	if err != nil {
-		logger.Errorf("failed to get routes for gateway %s: %v", client.ObjectKeyFromObject(gateway), err)
+		logger.Errorf("failed to get routes for gateway %.%ss: %v", gateway.Namespace, gateway.Name, err)
 		// TODO: decide how/if to report this error on Gateway
 		// reporter.Gateway(gateway).Err(err.Error())
 		return nil
 	}
 
 	for _, rErr := range routesForGw.RouteErrors {
-		reporter.Route(rErr.Route).ParentRef(&rErr.ParentRef).SetCondition(reports.RouteCondition{
+		reporter.Route(rErr.Route.GetSourceObject()).ParentRef(&rErr.ParentRef).SetCondition(reports.RouteCondition{
 			Type:   gwv1.RouteConditionAccepted,
 			Status: metav1.ConditionFalse,
 			Reason: rErr.Error.Reason,
@@ -73,45 +55,29 @@ func (t *translator) TranslateProxy(
 		})
 	}
 
-	for _, listener := range gateway.Spec.Listeners {
+	for _, listener := range gateway.Listeners {
 		availRoutes := 0
 		if res, ok := routesForGw.ListenerResults[string(listener.Name)]; ok {
 			// TODO we've never checked if the ListenerResult has an error.. is it already on RouteErrors?
 			availRoutes = len(res.Routes)
 		}
-		reporter.Gateway(gateway).Listener(&listener).SetAttachedRoutes(uint(availRoutes))
+		reporter.Gateway(gateway.Obj).ListenerName(string(listener.Name)).SetAttachedRoutes(uint(availRoutes))
 	}
 
 	listeners := listener.TranslateListeners(
+		kctx,
 		ctx,
 		t.queries,
-		t.pluginRegistry,
 		gateway,
 		routesForGw,
 		reporter,
 	)
 
-	return &v1.Proxy{
-		Metadata:  proxyMetadata(gateway, writeNamespace),
-		Listeners: listeners,
-	}
-}
-
-func proxyMetadata(gateway *gwv1.Gateway, writeNamespace string) *core.Metadata {
-	return &core.Metadata{
-		// Add the gateway name to the proxy name to ensure uniqueness of proxies
-		// TODO(Law): should this match the deployer generated name instead?
-		Name: fmt.Sprintf("%s-%s", gateway.GetNamespace(), gateway.GetName()),
-
-		// This needs to match the writeNamespace because the proxyClient will only look at namespaces in the whitelisted namespace list
-		Namespace: writeNamespace,
-
-		// All proxies are created in the writeNamespace (ie. gloo-system).
-		// We apply a label to maintain a reference to where the originating Gateway was defined
-		Labels: map[string]string{
-			// the proxy type key/value must stay in sync with the one defined in projects/gateway2/proxy_syncer/proxy_syncer.go
-			utils.ProxyTypeKey:        utils.GatewayApiProxyValue,
-			utils.GatewayNamespaceKey: gateway.GetNamespace(),
-		},
+	//	func() { panic("TODO: handle gw policy attachment") }()
+	return &ir.GatewayIR{
+		SourceObject:         gateway.Obj,
+		Listeners:            listeners,
+		AttachedPolicies:     gateway.AttachedListenerPolicies,
+		AttachedHttpPolicies: gateway.AttachedHttpPolicies,
 	}
 }
