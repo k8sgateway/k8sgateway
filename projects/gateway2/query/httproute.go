@@ -2,12 +2,12 @@ package query
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	"istio.io/istio/pkg/kube/krt"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/utils/ptr"
@@ -15,7 +15,7 @@ import (
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gwv1a2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 
-	"github.com/solo-io/gloo/projects/gateway2/translator/backendref"
+	"github.com/solo-io/gloo/projects/gateway2/ir"
 	"github.com/solo-io/gloo/projects/gateway2/wellknown"
 )
 
@@ -26,19 +26,17 @@ import (
 // as part of translation.
 type RouteInfo struct {
 	// Object is the generic route object which could be HTTPRoute, TCPRoute, etc.
-	Object client.Object
+	Object ir.Route
 
 	// ParentRef points to the Gateway (and optionally Listener) or HTTPRoute.
 	ParentRef gwv1.ParentReference
 
+	// ParentRef points to the Gateway (and optionally Listener).
+	ListenerParentRef gwv1.ParentReference
+
 	// hostnameOverrides can replace the HTTPRoute hostnames with those that intersect
 	// the attached listener's hostname(s).
 	HostnameOverrides []string
-
-	// Backends are pre-resolved here. This list will not contain delegates.
-	// Map values are either client.Object or error (errors can be passed to ProcessBackendRef).
-	// TODO should we ProcessBackendRef early and put cluster names here?)
-	Backends BackendMap[client.Object]
 
 	// Children contains all delegate HTTPRoutes referenced in any rule of this
 	// HTTPRoute, keyed by the backend ref for easy lookup.
@@ -48,7 +46,7 @@ type RouteInfo struct {
 
 // GetKind returns the kind of the route.
 func (r RouteInfo) GetKind() string {
-	return r.Object.GetObjectKind().GroupVersionKind().Kind
+	return r.Object.GetGroupKind().Kind
 }
 
 // GetName returns the name of the route.
@@ -68,25 +66,19 @@ func (r *RouteInfo) Hostnames() []string {
 		return r.HostnameOverrides
 	}
 
-	httpRoute, ok := r.Object.(*gwv1.HTTPRoute)
+	httpRoute, ok := r.Object.(*ir.HttpRouteIR)
 	if !ok {
 		return []string{}
 	}
 
-	strs := make([]string, 0, len(httpRoute.Spec.Hostnames))
-	for _, v := range httpRoute.Spec.Hostnames {
-		strs = append(strs, string(v))
+	if httpRoute.Hostnames != nil {
+		return httpRoute.Hostnames
 	}
-	return strs
-}
-
-// GetBackendForRef fetches a backend for a given BackendObjectReference.
-func (r *RouteInfo) GetBackendForRef(backendRef gwv1.BackendObjectReference) (client.Object, error) {
-	return r.Backends.get(backendRef, nil)
+	return []string{}
 }
 
 // GetChildrenForRef fetches child routes for a given BackendObjectReference.
-func (r *RouteInfo) GetChildrenForRef(backendRef gwv1.BackendObjectReference) ([]*RouteInfo, error) {
+func (r *RouteInfo) GetChildrenForRef(backendRef ir.ObjectSource) ([]*RouteInfo, error) {
 	return r.Children.get(backendRef, nil)
 }
 
@@ -97,10 +89,10 @@ func (r *RouteInfo) Clone() *RouteInfo {
 	}
 	// TODO (danehans): Why are hostnameOverrides not being cloned?
 	return &RouteInfo{
-		Object:    r.Object,
-		ParentRef: r.ParentRef,
-		Backends:  r.Backends,
-		Children:  r.Children,
+		Object:            r.Object,
+		ParentRef:         r.ParentRef,
+		ListenerParentRef: r.ListenerParentRef,
+		Children:          r.Children,
 	}
 }
 
@@ -113,20 +105,18 @@ func (r *RouteInfo) UniqueRouteName(ruleIdx, matchIdx int) string {
 // GetRouteChain recursively resolves all backends for the given route object.
 // It handles delegation of HTTPRoutes and resolves child routes.
 func (r *gatewayQueries) GetRouteChain(
+	kctx krt.HandlerContext,
 	ctx context.Context,
-	route client.Object,
+	route ir.Route,
 	hostnames []string,
 	parentRef gwv1.ParentReference,
 ) *RouteInfo {
-	var backends BackendMap[client.Object]
 	var children BackendMap[[]*RouteInfo]
 
 	switch typedRoute := route.(type) {
-	case *gwv1.HTTPRoute:
-		backends = r.resolveRouteBackends(ctx, typedRoute)
-		children = r.getDelegatedChildren(ctx, typedRoute, nil)
-	case *gwv1a2.TCPRoute:
-		backends = r.resolveRouteBackends(ctx, typedRoute)
+	case *ir.HttpRouteIR:
+		children = r.getDelegatedChildren(kctx, ctx, parentRef, typedRoute, nil)
+	case *ir.TcpRouteIR:
 		// TODO (danehans): Should TCPRoute delegation support be added in the future?
 	default:
 		return nil
@@ -136,12 +126,12 @@ func (r *gatewayQueries) GetRouteChain(
 		Object:            route,
 		HostnameOverrides: hostnames,
 		ParentRef:         parentRef,
-		Backends:          backends,
+		ListenerParentRef: parentRef,
 		Children:          children,
 	}
 }
 
-func (r *gatewayQueries) allowedRoutes(gw *gwv1.Gateway, l *gwv1.Listener) (func(string) bool, []metav1.GroupKind, error) {
+func (r *gatewayQueries) allowedRoutes(gw *gwv1.Gateway, l *gwv1.Listener) (func(krt.HandlerContext, string) bool, []metav1.GroupKind, error) {
 	var allowedKinds []metav1.GroupKind
 
 	// Determine the allowed route kinds based on the listener's protocol
@@ -198,46 +188,11 @@ func (r *gatewayQueries) allowedRoutes(gw *gwv1.Gateway, l *gwv1.Listener) (func
 	return allowedNs, allowedKinds, nil
 }
 
-func (r *gatewayQueries) resolveRouteBackends(ctx context.Context, obj client.Object) BackendMap[client.Object] {
-	out := NewBackendMap[client.Object]()
-	processBackendRefs := func(refs []gwv1.BackendObjectReference) {
-		for _, backendRef := range refs {
-			refObj, err := r.GetBackendForRef(ctx, r.ObjToFrom(obj), &backendRef)
-			if err != nil {
-				out.AddError(backendRef, err)
-				continue
-			}
-			out.Add(backendRef, refObj)
-		}
-	}
-
-	switch rt := obj.(type) {
-	case *gwv1.HTTPRoute:
-		for _, rule := range rt.Spec.Rules {
-			var refs []gwv1.BackendObjectReference
-			for _, ref := range rule.BackendRefs {
-				refs = append(refs, ref.BackendObjectReference)
-			}
-			processBackendRefs(refs)
-		}
-	case *gwv1a2.TCPRoute:
-		for _, rule := range rt.Spec.Rules {
-			var refs []gwv1.BackendObjectReference
-			for _, ref := range rule.BackendRefs {
-				refs = append(refs, ref.BackendObjectReference)
-			}
-			processBackendRefs(refs)
-		}
-	default:
-		return out
-	}
-
-	return out
-}
-
 func (r *gatewayQueries) getDelegatedChildren(
+	kctx krt.HandlerContext,
 	ctx context.Context,
-	parent *gwv1.HTTPRoute,
+	listenerRef gwv1.ParentReference,
+	parent *ir.HttpRouteIR,
 	visited sets.Set[types.NamespacedName],
 ) BackendMap[[]*RouteInfo] {
 	// Initialize the set of visited routes if it hasn't been initialized yet
@@ -254,24 +209,25 @@ func (r *gatewayQueries) getDelegatedChildren(
 	defer visited.Delete(parentRef)
 
 	children := NewBackendMap[[]*RouteInfo]()
-	for _, parentRule := range parent.Spec.Rules {
+	for _, parentRule := range parent.Rules {
 		var refChildren []*RouteInfo
-		for _, backendRef := range parentRule.BackendRefs {
+		for _, backendRef := range parentRule.Backends {
 			// Check if the backend reference is an HTTPRoute
-			if !backendref.RefIsHTTPRoute(backendRef.BackendObjectReference) {
+			if backendRef.Delegate == nil {
 				continue
 			}
+			ref := *backendRef.Delegate
 			// Fetch child routes based on the backend reference
-			referencedRoutes, err := r.fetchChildRoutes(ctx, parent.Namespace, backendRef)
+			referencedRoutes, err := r.fetchChildRoutes(kctx, ctx, parent.Namespace, backendRef)
 			if err != nil {
-				children.AddError(backendRef.BackendObjectReference, err)
+				children.AddError(ref, err)
 				continue
 			}
 			for _, childRoute := range referencedRoutes {
 				childRef := namespacedName(&childRoute)
 				if visited.Has(childRef) {
 					err := fmt.Errorf("ignoring child route %s for parent %s: %w", childRef, parentRef, ErrCyclicReference)
-					children.AddError(backendRef.BackendObjectReference, err)
+					children.AddError(ref, err)
 					// Don't resolve invalid child route
 					continue
 				}
@@ -284,53 +240,43 @@ func (r *gatewayQueries) getDelegatedChildren(
 						Namespace: ptr.To(gwv1.Namespace(parent.Namespace)),
 						Name:      gwv1.ObjectName(parent.Name),
 					},
-					Backends: r.resolveRouteBackends(ctx, &childRoute),
-					Children: r.getDelegatedChildren(ctx, &childRoute, visited),
+					ListenerParentRef: listenerRef,
+					Children:          r.getDelegatedChildren(kctx, ctx, listenerRef, &childRoute, visited),
 				}
 				refChildren = append(refChildren, routeInfo)
 			}
 			// Add the resolved children routes to the backend map
-			children.Add(backendRef.BackendObjectReference, refChildren)
+			children.Add(ref, refChildren)
 		}
 	}
 	return children
 }
 
 func (r *gatewayQueries) fetchChildRoutes(
+	kctx krt.HandlerContext,
 	ctx context.Context,
 	parentNamespace string,
-	backendRef gwv1.HTTPBackendRef,
-) ([]gwv1.HTTPRoute, error) {
-	delegatedNs := parentNamespace
-	if !backendref.RefIsHTTPRoute(backendRef.BackendObjectReference) {
+	backend ir.HttpBackendOrDelegate,
+) ([]ir.HttpRouteIR, error) {
+
+	if backend.Delegate == nil {
 		return nil, nil
 	}
-	// Use the namespace specified in the backend reference if available
-	if backendRef.Namespace != nil {
-		delegatedNs = string(*backendRef.Namespace)
-	}
+	backendRef := *backend.Delegate
+	delegatedNs := backendRef.Namespace
 
-	var refChildren []gwv1.HTTPRoute
+	var refChildren []ir.HttpRouteIR
 	if string(backendRef.Name) == "" || string(backendRef.Name) == "*" {
 		// Handle wildcard references by listing all HTTPRoutes in the specified namespace
-		var hrlist gwv1.HTTPRouteList
-		err := r.client.List(ctx, &hrlist, client.InNamespace(delegatedNs))
-		if err != nil {
-			return nil, err
-		}
-		refChildren = append(refChildren, hrlist.Items...)
+		routes := r.routes.ListHttp(kctx, delegatedNs)
+		refChildren = append(refChildren, routes...)
 	} else {
 		// Lookup a specific child route by its name
-		delegatedRef := types.NamespacedName{
-			Namespace: delegatedNs,
-			Name:      string(backendRef.Name),
+		route := r.routes.FetchHttp(kctx, delegatedNs, string(backendRef.Name))
+		if route == nil {
+			return nil, errors.New("not found")
 		}
-		child := &gwv1.HTTPRoute{}
-		err := r.client.Get(ctx, delegatedRef, child)
-		if err != nil {
-			return nil, err
-		}
-		refChildren = append(refChildren, *child)
+		refChildren = append(refChildren, *route)
 	}
 	// Check if no child routes were resolved and log an error if needed
 	if len(refChildren) == 0 {
@@ -340,36 +286,17 @@ func (r *gatewayQueries) fetchChildRoutes(
 	return refChildren, nil
 }
 
-func (r *gatewayQueries) GetRoutesForGateway(ctx context.Context, gw *gwv1.Gateway) (*RoutesForGwResult, error) {
+func (r *gatewayQueries) GetRoutesForGateway(kctx krt.HandlerContext, ctx context.Context, gw *gwv1.Gateway) (*RoutesForGwResult, error) {
 	nns := types.NamespacedName{
 		Namespace: gw.Namespace,
 		Name:      gw.Name,
 	}
 
-	// List of route types to process based on installed CRDs
-	routeListTypes := []client.ObjectList{&gwv1.HTTPRouteList{}}
-
-	// Conditionally include TCPRouteList
-	tcpRouteGVK := schema.GroupVersionKind{
-		Group:   gwv1a2.GroupVersion.Group,
-		Version: gwv1a2.GroupVersion.Version,
-		Kind:    wellknown.TCPRouteKind,
-	}
-	if r.scheme.Recognizes(tcpRouteGVK) {
-		routeListTypes = append(routeListTypes, &gwv1a2.TCPRouteList{})
-	}
-
-	var routes []client.Object
-	for _, routeList := range routeListTypes {
-		if err := fetchRoutes(ctx, r, routeList, nns, &routes); err != nil {
-			return nil, err
-		}
-	}
-
 	// Process each route
 	ret := NewRoutesForGwResult()
+	routes := fetchRoutes(kctx, r, nns)
 	for _, route := range routes {
-		if err := r.processRoute(ctx, gw, route, ret); err != nil {
+		if err := r.processRoute(kctx, ctx, gw, route, ret); err != nil {
 			return nil, err
 		}
 	}
@@ -378,38 +305,15 @@ func (r *gatewayQueries) GetRoutesForGateway(ctx context.Context, gw *gwv1.Gatew
 }
 
 // fetchRoutes is a helper function to fetch routes and add to the routes slice.
-func fetchRoutes(ctx context.Context, r *gatewayQueries, routeList client.ObjectList, nns types.NamespacedName, routes *[]client.Object) error {
-	listAndAppendRoutes := func(list client.ObjectList, fieldSelector string) error {
-		if err := r.client.List(ctx, list, client.MatchingFieldsSelector{Selector: fields.OneTermEqualSelector(fieldSelector, nns.String())}); err != nil {
-			return fmt.Errorf("failed to list routes: %w", err)
-		}
-		routeItems, err := getRouteItems(list)
-		if err != nil {
-			return fmt.Errorf("failed to get route items: %w", err)
-		}
-		*routes = append(*routes, routeItems...)
-		return nil
-	}
-
-	switch list := routeList.(type) {
-	case *gwv1.HTTPRouteList:
-		if err := listAndAppendRoutes(list, HttpRouteTargetField); err != nil {
-			return fmt.Errorf("failed to list HTTPRoutes: %w", err)
-		}
-	case *gwv1a2.TCPRouteList:
-		if err := listAndAppendRoutes(list, TcpRouteTargetField); err != nil {
-			return fmt.Errorf("failed to list TCPRoutes: %w", err)
-		}
-	default:
-		return fmt.Errorf("unsupported route list type: %T", list)
-	}
-
-	return nil
+func fetchRoutes(kctx krt.HandlerContext, r *gatewayQueries, nns types.NamespacedName) []ir.Route {
+	return r.routes.RoutesForGateway(kctx, nns)
 }
 
-func (r *gatewayQueries) processRoute(ctx context.Context, gw *gwv1.Gateway, route client.Object, ret *RoutesForGwResult) error {
+func (r *gatewayQueries) processRoute(
+	kctx krt.HandlerContext,
+	ctx context.Context, gw *gwv1.Gateway, route ir.Route, ret *RoutesForGwResult) error {
 	refs := getParentRefsForGw(gw, route)
-	routeKind := route.GetObjectKind().GroupVersionKind().Kind
+	routeKind := route.GetGroupKind().Kind
 
 	for _, ref := range refs {
 		anyRoutesAllowed := false
@@ -435,7 +339,7 @@ func (r *gatewayQueries) processRoute(ctx context.Context, gw *gwv1.Gateway, rou
 			}
 
 			// Check if the namespace of the route is allowed by the listener
-			if !allowedNs(route.GetNamespace()) {
+			if !allowedNs(kctx, route.GetNamespace()) {
 				continue
 			}
 			anyRoutesAllowed = true
@@ -449,7 +353,7 @@ func (r *gatewayQueries) processRoute(ctx context.Context, gw *gwv1.Gateway, rou
 			// If the route is an HTTPRoute, check the hostname intersection
 			var hostnames []string
 			if routeKind == wellknown.HTTPRouteKind {
-				if hr, ok := route.(*gwv1.HTTPRoute); ok {
+				if hr, ok := route.(*ir.HttpRouteIR); ok {
 					var ok bool
 					ok, hostnames = hostnameIntersect(&l, hr)
 					if !ok {
@@ -460,7 +364,7 @@ func (r *gatewayQueries) processRoute(ctx context.Context, gw *gwv1.Gateway, rou
 			}
 
 			// If all checks pass, add the route to the listener result
-			lr.Routes = append(lr.Routes, r.GetRouteChain(ctx, route, hostnames, ref))
+			lr.Routes = append(lr.Routes, r.GetRouteChain(kctx, ctx, route, hostnames, ref))
 		}
 
 		// Handle route errors based on checks

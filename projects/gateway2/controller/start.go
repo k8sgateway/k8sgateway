@@ -10,30 +10,36 @@ import (
 	glooschemes "github.com/solo-io/gloo/pkg/schemes"
 	"github.com/solo-io/go-utils/contextutils"
 
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	czap "sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	gwv1a2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 
-	gatewaykubev1 "github.com/solo-io/gloo/projects/gateway/pkg/api/v1/kube/apis/gateway.solo.io/v1"
 	"github.com/solo-io/gloo/projects/gateway2/deployer"
-	"github.com/solo-io/gloo/projects/gateway2/extensions"
-	ext "github.com/solo-io/gloo/projects/gateway2/extensions"
+	"github.com/solo-io/gloo/projects/gateway2/extensions2"
+	"github.com/solo-io/gloo/projects/gateway2/extensions2/common"
+	extensionsplug "github.com/solo-io/gloo/projects/gateway2/extensions2/plugin"
+	"github.com/solo-io/gloo/projects/gateway2/extensions2/registry"
+	"github.com/solo-io/gloo/projects/gateway2/ir"
 	"github.com/solo-io/gloo/projects/gateway2/krtcollections"
+	"github.com/solo-io/gloo/projects/gateway2/pkg/client/clientset/versioned"
 	"github.com/solo-io/gloo/projects/gateway2/proxy_syncer"
+	"github.com/solo-io/gloo/projects/gateway2/utils/krtutil"
 	"github.com/solo-io/gloo/projects/gateway2/wellknown"
-	extauthkubev1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1/enterprise/options/extauth/v1/kube/apis/enterprise.gloo.solo.io/v1"
 	glookubev1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1/kube/apis/gloo.solo.io/v1"
 	"github.com/solo-io/gloo/projects/gloo/pkg/bootstrap"
 	"github.com/solo-io/gloo/projects/gloo/pkg/syncer"
-	"github.com/solo-io/gloo/projects/gloo/pkg/syncer/setup"
 	"github.com/solo-io/solo-kit/pkg/api/v2/reporter"
 	uzap "go.uber.org/zap"
 	istiokube "istio.io/istio/pkg/kube"
+	"istio.io/istio/pkg/kube/kclient"
 	"istio.io/istio/pkg/kube/krt"
+	corev1 "k8s.io/api/core/v1"
+	apiv1 "sigs.k8s.io/gateway-api/apis/v1"
+	gwv1beta1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 )
 
 const (
@@ -50,7 +56,7 @@ type StartConfig struct {
 	RestConfig *rest.Config
 	// ExtensionsFactory is the factory function which will return an extensions.K8sGatewayExtensions
 	// This is responsible for producing the extension points that this controller requires
-	ExtensionsFactory extensions.K8sGatewayExtensionsFactory
+	ExtraPlugins []extensionsplug.Plugin
 
 	// GlooStatusReporter is the shared reporter from setup_syncer that reports as 'gloo',
 	// it is used to report on Upstreams and Proxies after xds translation.
@@ -62,9 +68,6 @@ type StartConfig struct {
 	// TODO: as mentioned above, this should be removed: https://github.com/solo-io/solo-projects/issues/7055
 	KubeGwStatusReporter reporter.StatusReporter
 
-	// Translator is an instance of the Gloo translator used to translate Proxy -> xDS Snapshot
-	Translator setup.TranslatorFactory
-
 	// SyncerExtensions is a list of extensions, the kube gw controller will use these to get extension-specific
 	// errors & warnings for any Proxies it generates
 	SyncerExtensions []syncer.TranslatorSyncerExtension
@@ -72,32 +75,31 @@ type StartConfig struct {
 	Client istiokube.Client
 
 	AugmentedPods krt.Collection[krtcollections.LocalityPod]
-	UniqueClients krt.Collection[krtcollections.UniqlyConnectedClient]
+	UniqueClients krt.Collection[ir.UniqlyConnectedClient]
 
 	InitialSettings *glookubev1.Settings
 	Settings        krt.Singleton[glookubev1.Settings]
 
-	Debugger *krt.DebugHandler
+	KrtOptions krtutil.KrtOptions
 }
 
 // Start runs the controllers responsible for processing the K8s Gateway API objects
 // It is intended to be run in a goroutine as the function will block until the supplied
 // context is cancelled
 type ControllerBuilder struct {
-	proxySyncer     *proxy_syncer.ProxySyncer
-	inputChannels   *proxy_syncer.GatewayInputChannels
-	cfg             StartConfig
-	k8sGwExtensions ext.K8sGatewayExtensions
-	mgr             ctrl.Manager
+	proxySyncer *proxy_syncer.ProxySyncer
+	cfg         StartConfig
+	mgr         ctrl.Manager
+	isOurGw     func(gw *apiv1.Gateway) bool
 }
 
 func NewControllerBuilder(ctx context.Context, cfg StartConfig) (*ControllerBuilder, error) {
-	var opts []zap.Opts
+	var opts []czap.Opts
 	if cfg.Dev {
 		setupLog.Info("starting log in dev mode")
-		opts = append(opts, zap.UseDevMode(true))
+		opts = append(opts, czap.UseDevMode(true))
 	}
-	ctrl.SetLogger(zap.New(opts...))
+	ctrl.SetLogger(czap.New(opts...))
 
 	scheme := glooschemes.DefaultScheme()
 
@@ -132,44 +134,46 @@ func NewControllerBuilder(ctx context.Context, cfg StartConfig) (*ControllerBuil
 	// TODO: replace this with something that checks that we have xds snapshot ready (or that we don't need one).
 	mgr.AddReadyzCheck("ready-ping", healthz.Ping)
 
-	virtualHostOptionCollection := proxy_syncer.SetupCollectionDynamic[gatewaykubev1.VirtualHostOption](
-		ctx,
-		cfg.Client,
-		gatewaykubev1.SchemeGroupVersion.WithResource("virtualhostoptions"),
-		krt.WithName("VirtualHostOption"))
-
-	routeOptionCollection := proxy_syncer.SetupCollectionDynamic[gatewaykubev1.RouteOption](
-		ctx,
-		cfg.Client,
-		gatewaykubev1.SchemeGroupVersion.WithResource("routeoptions"),
-		krt.WithName("RouteOption"))
-
-	authConfigCollection := proxy_syncer.SetupCollectionDynamic[extauthkubev1.AuthConfig](
-		ctx,
-		cfg.Client,
-		gatewaykubev1.SchemeGroupVersion.WithResource("authconfigs"),
-		krt.WithName("AuthConfig"))
-
-	inputChannels := proxy_syncer.NewGatewayInputChannels()
-
 	setupLog.Info("initializing k8sgateway extensions")
-	k8sGwExtensions, err := cfg.ExtensionsFactory(ctx, ext.K8sGatewayExtensionsFactoryParameters{
-		Mgr:         mgr,
-		IstioClient: cfg.Client,
-		CoreCollections: ext.CoreCollections{
-			AugmentedPods:               cfg.AugmentedPods,
-			RouteOptionCollection:       routeOptionCollection,
-			VirtualHostOptionCollection: virtualHostOptionCollection,
-			AuthConfigCollection:        authConfigCollection,
-		},
-		StatusReporter: cfg.KubeGwStatusReporter,
-		KickXds:        inputChannels.Kick,
-	})
-	if err != nil {
-		setupLog.Error(err, "unable to create k8s gw extensions")
-		return nil, err
+	secretClient := kclient.New[*corev1.Secret](cfg.Client)
+	k8sSecretsRaw := krt.WrapClient(secretClient, krt.WithStop(ctx.Done()), krt.WithName("Secrets") /* no debug here - we don't want raw secrets printed*/)
+	k8sSecrets := krt.NewCollection(k8sSecretsRaw, func(kctx krt.HandlerContext, i *corev1.Secret) *ir.Secret {
+		res := ir.Secret{
+			ObjectSource: ir.ObjectSource{
+				Group:     "",
+				Kind:      "Secret",
+				Namespace: i.Namespace,
+				Name:      i.Name,
+			},
+			Obj:  i,
+			Data: i.Data,
+		}
+		return &res
+	}, cfg.KrtOptions.ToOptions("secrets")...)
+	secrets := map[schema.GroupKind]krt.Collection[ir.Secret]{
+		{Group: "", Kind: "Secret"}: k8sSecrets,
 	}
 
+	refgrantsCol := krt.WrapClient(kclient.New[*gwv1beta1.ReferenceGrant](cfg.Client), cfg.KrtOptions.ToOptions("RefGrants")...)
+	refgrants := krtcollections.NewRefGrantIndex(refgrantsCol)
+	cli, err := versioned.NewForConfig(cfg.RestConfig)
+	if err != nil {
+		return nil, err
+	}
+	commoncol := common.CommonCollections{
+		OurClient: cli,
+		Client:    cfg.Client,
+		KrtOpts:   cfg.KrtOptions,
+		Secrets:   krtcollections.NewSecretIndex(secrets, refgrants),
+		Pods:      cfg.AugmentedPods,
+		Settings:  cfg.Settings,
+		RefGrants: refgrants,
+	}
+
+	gwClasses := sets.New(append(cfg.SetupOpts.ExtraGatewayClasses, wellknown.GatewayClassName)...)
+	isOurGw := func(gw *apiv1.Gateway) bool {
+		return gwClasses.Has(string(gw.Spec.GatewayClassName))
+	}
 	// Create the proxy syncer for the Gateway API resources
 	setupLog.Info("initializing proxy syncer")
 	proxySyncer := proxy_syncer.NewProxySyncer(
@@ -177,36 +181,40 @@ func NewControllerBuilder(ctx context.Context, cfg StartConfig) (*ControllerBuil
 		cfg.InitialSettings,
 		cfg.Settings,
 		wellknown.GatewayControllerName,
-		setup.GetWriteNamespace(&cfg.InitialSettings.Spec),
-		inputChannels,
 		mgr,
 		cfg.Client,
 		cfg.AugmentedPods,
 		cfg.UniqueClients,
-		k8sGwExtensions,
-		cfg.Translator,
+		pluginFactoryWithBuiltin(cfg.ExtraPlugins),
+		commoncol,
 		cfg.SetupOpts.Cache,
-		cfg.SyncerExtensions,
-		cfg.GlooStatusReporter,
-		cfg.SetupOpts.ProxyReconcileQueue,
 	)
-	proxySyncer.Init(ctx, cfg.Debugger)
+	proxySyncer.Init(ctx, isOurGw, cfg.KrtOptions)
 	if err := mgr.Add(proxySyncer); err != nil {
 		setupLog.Error(err, "unable to add proxySyncer runnable")
 		return nil, err
 	}
+	setupLog.Info("starting controller builder", "GatewayClasses", sets.List(gwClasses))
 
 	return &ControllerBuilder{
-		proxySyncer:     proxySyncer,
-		inputChannels:   inputChannels,
-		cfg:             cfg,
-		k8sGwExtensions: k8sGwExtensions,
-		mgr:             mgr,
+		proxySyncer: proxySyncer,
+		cfg:         cfg,
+		mgr:         mgr,
+		isOurGw:     isOurGw,
 	}, nil
 }
 
+func pluginFactoryWithBuiltin(extraPlugins []extensionsplug.Plugin) extensions2.K8sGatewayExtensionsFactory {
+	return func(ctx context.Context, commoncol *common.CommonCollections) extensionsplug.Plugin {
+		plugins := registry.Plugins(ctx, commoncol)
+		plugins = append(plugins, krtcollections.NewBuiltinPlugin(ctx))
+		plugins = append(plugins, extraPlugins...)
+		return registry.MergePlugins(plugins...)
+	}
+}
+
 func (c *ControllerBuilder) Start(ctx context.Context) error {
-	logger := contextutils.LoggerFrom(ctx)
+	logger := contextutils.LoggerFrom(ctx).Desugar()
 	logger.Info("starting gateway controller")
 	// GetXdsAddress waits for gloo-edge to populate the xds address of the server.
 	// in the future this logic may move here and be duplicated.
@@ -215,7 +223,7 @@ func (c *ControllerBuilder) Start(ctx context.Context) error {
 		return ctx.Err()
 	}
 
-	logger.Infow("got xds address for deployer", uzap.String("xds_host", xdsHost), uzap.Int32("xds_port", xdsPort))
+	logger.Info("got xds address for deployer", uzap.String("xds_host", xdsHost), uzap.Int32("xds_port", xdsPort))
 
 	integrationEnabled := c.cfg.InitialSettings.Spec.GetGloo().GetIstioOptions().GetEnableIntegration().GetValue()
 
@@ -237,15 +245,9 @@ func (c *ControllerBuilder) Start(ctx context.Context) error {
 		}
 	}
 
-	// Initialize the set of Gateway API CRDs we care about
-	crds, err := getGatewayCRDs(c.cfg.RestConfig)
-	if err != nil {
-		return err
-	}
-
 	gwCfg := GatewayConfig{
 		Mgr:            c.mgr,
-		GWClasses:      sets.New(append(c.cfg.SetupOpts.ExtraGatewayClasses, wellknown.GatewayClassName)...),
+		OurGateway:     c.isOurGw,
 		ControllerName: wellknown.GatewayControllerName,
 		AutoProvision:  AutoProvision,
 		ControlPlane: deployer.ControlPlaneInfo{
@@ -255,29 +257,12 @@ func (c *ControllerBuilder) Start(ctx context.Context) error {
 		// TODO pass in the settings so that the deloyer can register to it for changes.
 		IstioIntegrationEnabled: integrationEnabled,
 		Aws:                     awsInfo,
-		Kick:                    c.inputChannels.Kick,
-		Extensions:              c.k8sGwExtensions,
-		CRDs:                    crds,
 	}
+
 	if err := NewBaseGatewayController(ctx, gwCfg); err != nil {
 		setupLog.Error(err, "unable to create controller")
 		return err
 	}
 
 	return c.mgr.Start(ctx)
-}
-
-func getGatewayCRDs(restConfig *rest.Config) (sets.Set[string], error) {
-	crds := wellknown.GatewayStandardCRDs
-
-	tcpRouteExists, err := glooschemes.CRDExists(restConfig, gwv1a2.GroupVersion.Group, gwv1a2.GroupVersion.Version, wellknown.TCPRouteKind)
-	if err != nil {
-		return nil, err
-	}
-
-	if tcpRouteExists {
-		crds.Insert(wellknown.TCPRouteCRDName)
-	}
-
-	return crds, nil
 }

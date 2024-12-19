@@ -3,6 +3,7 @@ package httproute
 import (
 	"container/list"
 	"context"
+	"errors"
 	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -12,15 +13,16 @@ import (
 	gwv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/rotisserie/eris"
+	"github.com/solo-io/gloo/projects/gateway2/ir"
 	"github.com/solo-io/gloo/projects/gateway2/query"
 	"github.com/solo-io/gloo/projects/gateway2/reports"
-	"github.com/solo-io/gloo/projects/gateway2/translator/backendref"
-	"github.com/solo-io/gloo/projects/gateway2/translator/plugins"
-	"github.com/solo-io/gloo/projects/gateway2/translator/plugins/registry"
 	"github.com/solo-io/gloo/projects/gateway2/wellknown"
-	v1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1"
 	"github.com/solo-io/go-utils/contextutils"
 )
+
+type DelegationCtx struct {
+	Ref types.NamespacedName
+}
 
 // flattenDelegatedRoutes recursively translates a delegated route tree.
 //
@@ -30,17 +32,16 @@ import (
 func flattenDelegatedRoutes(
 	ctx context.Context,
 	parent *query.RouteInfo,
-	backendRef gwv1.HTTPBackendRef,
+	backend ir.HttpBackendOrDelegate,
 	parentReporter reports.ParentRefReporter,
 	baseReporter reports.Reporter,
-	pluginRegistry registry.PluginRegistry,
 	gwListener gwv1.Listener,
 	parentMatch gwv1.HTTPRouteMatch,
-	outputs *[]*v1.Route,
+	outputs *[]ir.HttpRouteRuleMatchIR,
 	routesVisited sets.Set[types.NamespacedName],
 	delegationChain *list.List,
 ) error {
-	parentRoute, ok := parent.Object.(*gwv1.HTTPRoute)
+	parentRoute, ok := parent.Object.(*ir.HttpRouteIR)
 	if !ok {
 		return eris.Errorf("unsupported route type: %T", parent.Object)
 	}
@@ -48,28 +49,28 @@ func flattenDelegatedRoutes(
 	routesVisited.Insert(parentRef)
 	defer routesVisited.Delete(parentRef)
 
-	delegationCtx := plugins.DelegationCtx{
+	delegationCtx := DelegationCtx{
 		Ref: parentRef,
 	}
 	lRef := delegationChain.PushFront(delegationCtx)
 	defer delegationChain.Remove(lRef)
 
-	rawChildren, err := parent.GetChildrenForRef(backendRef.BackendObjectReference)
+	rawChildren, err := parent.GetChildrenForRef(*backend.Delegate)
 	if len(rawChildren) == 0 || err != nil {
 		if err == nil {
-			err = eris.Errorf("unresolved reference %s", backendref.ToString(backendRef.BackendObjectReference))
+			err = eris.Errorf("unresolved reference %s", backend.Delegate.ResourceName())
 		}
 		return err
 	}
 	children := filterDelegatedChildren(parentRef, parentMatch, rawChildren)
 
 	// Child routes inherit the hostnames from the parent route
-	hostnames := make([]gwv1.Hostname, len(parentRoute.Spec.Hostnames))
-	copy(hostnames, parentRoute.Spec.Hostnames)
+	hostnames := make([]string, len(parentRoute.Hostnames))
+	copy(hostnames, parentRoute.Hostnames)
 
 	// For these child routes, recursively flatten them
 	for _, child := range children {
-		childRoute, ok := child.Object.(*gwv1.HTTPRoute)
+		childRoute, ok := child.Object.(*ir.HttpRouteIR)
 		if !ok {
 			msg := fmt.Sprintf("ignoring unsupported child route type %T for parent httproute %v", child.Object, parentRef)
 			contextutils.LoggerFrom(ctx).Warn(msg)
@@ -92,7 +93,7 @@ func flattenDelegatedRoutes(
 		}
 
 		// Create a new reporter for the child route
-		reporter := baseReporter.Route(childRoute).ParentRef(&gwv1.ParentReference{
+		reporter := baseReporter.Route(childRoute.GetSourceObject()).ParentRef(&gwv1.ParentReference{
 			Group:     ptr.To(gwv1.Group(wellknown.GatewayGroup)),
 			Kind:      ptr.To(gwv1.Kind(wellknown.HTTPRouteKind)),
 			Name:      gwv1.ObjectName(parentRef.Name),
@@ -110,17 +111,17 @@ func flattenDelegatedRoutes(
 		}
 
 		translateGatewayHTTPRouteRulesUtil(
-			ctx, pluginRegistry, gwListener, child, reporter, baseReporter, outputs, routesVisited, hostnames, delegationChain)
+			ctx, gwListener, child, reporter, baseReporter, outputs, routesVisited, hostnames, delegationChain)
 	}
 
 	return nil
 }
 
 func validateChildRoute(
-	route gwv1.HTTPRoute,
+	route ir.HttpRouteIR,
 ) error {
-	if len(route.Spec.Hostnames) > 0 {
-		return eris.New("spec.hostnames must be unset on a delegatee route as they are inherited from the parent route")
+	if len(route.Hostnames) > 0 {
+		return errors.New("spec.hostnames must be unset on a delegatee route as they are inherited from the parent route")
 	}
 	return nil
 }

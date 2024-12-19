@@ -31,14 +31,10 @@ import (
 
 	discovery_v3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 	"github.com/go-logr/zapr"
-	"github.com/solo-io/gloo/projects/gateway2/extensions"
 	"github.com/solo-io/gloo/projects/gateway2/krtcollections"
 	"github.com/solo-io/gloo/projects/gateway2/proxy_syncer"
 	ggv2setup "github.com/solo-io/gloo/projects/gateway2/setup"
-	ggv2utils "github.com/solo-io/gloo/projects/gateway2/utils"
-	gloov1 "github.com/solo-io/gloo/projects/gloo/pkg/api/v1"
 	"github.com/solo-io/gloo/projects/gloo/pkg/bootstrap"
-	"github.com/solo-io/gloo/projects/gloo/pkg/plugins/registry"
 	"github.com/solo-io/gloo/projects/gloo/pkg/servers/iosnapshot"
 	gloosetup "github.com/solo-io/gloo/projects/gloo/pkg/syncer/setup"
 	"github.com/solo-io/gloo/projects/gloo/pkg/xds"
@@ -201,15 +197,10 @@ func TestScenarios(t *testing.T) {
 	}()
 
 	// start ggv2
-	// (note: we don't have gloo-edge working, so nothing will reconcile the proxies.
-	// that's mostly ok, as we don't test the features that require these proxies in gloo-edge)
-	setupOpts.ProxyReconcileQueue = ggv2utils.NewAsyncQueue[gloov1.ProxyList]()
-
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		ggv2setup.StartGGv2WithConfig(ctx, setupOpts, cfg, builder, extensions.NewK8sGatewayExtensions,
-			registry.GetPluginRegistryFactory,
+		ggv2setup.StartGGv2WithConfig(ctx, setupOpts, cfg, builder, nil,
 			types.NamespacedName{Name: "default", Namespace: "default"},
 		)
 	}()
@@ -233,12 +224,6 @@ func TestScenarios(t *testing.T) {
 				t.Cleanup(func() {
 					writer.set(parentT)
 				})
-				t.Cleanup(func() {
-					if t.Failed() {
-						j, _ := setupOpts.KrtDebugger.MarshalJSON()
-						t.Logf("krt state for failed test: %s %s", t.Name(), string(j))
-					}
-				})
 				//sadly tests can't run yet in parallel, as ggv2 will add all the k8s services as clusters. this means
 				// that we get test pollution.
 				// once we change it to only include the ones in the proxy, we can re-enable this
@@ -250,7 +235,8 @@ func TestScenarios(t *testing.T) {
 	}
 }
 
-func testScenario(t *testing.T, ctx context.Context, kdbg *krt.DebugHandler, snapCache cache.SnapshotCache, client istiokube.CLIClient, xdsPort int, f string) {
+func testScenario(t *testing.T, ctx context.Context, kdbg *krt.DebugHandler,
+	snapCache cache.SnapshotCache, client istiokube.CLIClient, xdsPort int, f string) {
 	fext := filepath.Ext(f)
 	fpre := strings.TrimSuffix(f, fext)
 	fout := fpre + "-out" + fext
@@ -284,14 +270,16 @@ func testScenario(t *testing.T, ctx context.Context, kdbg *krt.DebugHandler, sna
 	os.WriteFile(yamlfile, []byte(testyaml), 0644)
 
 	err = client.ApplyYAMLFiles("", yamlfile)
-	defer func() {
+
+	t.Cleanup(func() {
 		// always delete yamls, even if there was an error applying them; to prevent test pollution.
 		err := client.DeleteYAMLFiles("", yamlfile)
 		if err != nil {
 			t.Fatalf("failed to delete yaml: %v", err)
 		}
 		t.Log("deleted yamls", t.Name())
-	}()
+	})
+
 	if err != nil {
 		t.Fatalf("failed to apply yaml: %v", err)
 	}
@@ -300,7 +288,19 @@ func testScenario(t *testing.T, ctx context.Context, kdbg *krt.DebugHandler, sna
 	time.Sleep(time.Second)
 
 	dumper := newXdsDumper(t, ctx, xdsPort, testgwname)
-	defer dumper.Close()
+	t.Cleanup(dumper.Close)
+
+	t.Cleanup(func() {
+		if t.Failed() {
+			j, err := kdbg.MarshalJSON()
+			if err != nil {
+				t.Logf("failed to marshal krt state: %v", err)
+			} else {
+				t.Logf("krt state for failed test: %s %s", t.Name(), string(j))
+			}
+		}
+	})
+
 	dump := dumper.Dump(t, ctx)
 	if len(dump.Listeners) == 0 {
 		xdsDump := iosnapshot.GetXdsSnapshotDataFromCache(snapCache).MarshalJSONString()
@@ -356,7 +356,7 @@ func newXdsDumper(t *testing.T, ctx context.Context, xdsPort int, gwname string)
 		dr: &discovery_v3.DiscoveryRequest{Node: &envoycore.Node{
 			Id: "gateway.gwtest",
 			Metadata: &structpb.Struct{
-				Fields: map[string]*structpb.Value{"role": {Kind: &structpb.Value_StringValue{StringValue: fmt.Sprintf("gloo-kube-gateway-api~%s~%s-%s", "gwtest", "gwtest", gwname)}}}},
+				Fields: map[string]*structpb.Value{"role": {Kind: &structpb.Value_StringValue{StringValue: fmt.Sprintf("gloo-kube-gateway-api~%s~%s", "gwtest", gwname)}}}},
 		}},
 	}
 
@@ -449,6 +449,9 @@ func (x xdsDumper) Dump(t *testing.T, ctx context.Context) xdsDump {
 		if c.GetEdsClusterConfig() != nil {
 			if c.GetEdsClusterConfig().GetServiceName() != "" {
 				s := c.GetEdsClusterConfig().GetServiceName()
+				if s == "" {
+					s = c.GetName()
+				}
 				return &s
 			}
 			return &c.Name
@@ -497,7 +500,7 @@ func (x xdsDumper) Dump(t *testing.T, ctx context.Context) xdsDump {
 						t.Errorf("failed to unmarshal cla: %v", err)
 					}
 					// remove kube endpoints, as with envtests we will get random ports, so we cant assert on them
-					if !strings.Contains(cla.ClusterName, "kube-svc:default-kubernetes") {
+					if !strings.Contains(cla.ClusterName, "kubernetes") {
 						endpoints = append(endpoints, &cla)
 					}
 				}

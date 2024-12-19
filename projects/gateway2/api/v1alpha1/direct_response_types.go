@@ -4,8 +4,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// +kubebuilder:rbac:groups=gateway.gloo.solo.io,resources=directresponses,verbs=get;list;watch
+// +kubebuilder:rbac:groups=gateway.gloo.solo.io,resources=directresponses/status,verbs=get;update;patch
+
 // DirectResponse contains configuration for defining direct response routes.
 //
+// +genclient
 // +kubebuilder:object:root=true
 // +kubebuilder:metadata:labels={app=gloo-gateway,app.kubernetes.io/name=gloo-gateway}
 // +kubebuilder:resource:categories=gloo-gateway,shortName=dr
@@ -58,8 +62,4 @@ func (in *DirectResponse) GetBody() string {
 		return ""
 	}
 	return in.Spec.Body
-}
-
-func init() {
-	SchemeBuilder.Register(&DirectResponse{}, &DirectResponseList{})
 }

@@ -8,11 +8,9 @@ import (
 	"github.com/solo-io/gloo/pkg/utils/envutils"
 	"github.com/solo-io/gloo/projects/gloo/pkg/xds"
 
-	"github.com/solo-io/solo-kit/pkg/api/v2/reporter"
 	"istio.io/istio/pkg/kube/krt"
 
-	"github.com/solo-io/gloo/projects/gateway2/translator/plugins/registry"
-	"github.com/solo-io/gloo/projects/gateway2/translator/translatorutils"
+	"github.com/solo-io/solo-kit/pkg/api/v1/control-plane/cache"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -23,15 +21,13 @@ import (
 )
 
 var (
-	UseDetailedUnmarshalling = envutils.IsEnvTruthy("DETAILED_SNAP_UNMARSHALLING")
+	UseDetailedUnmarshalling = !envutils.IsEnvTruthy("DISABLE_DETAILED_SNAP_UNMARSHALLING")
 )
 
 type XdsSnapWrapper struct {
 	snap            *xds.EnvoySnapshot
+	erroredClusters []string
 	proxyKey        string
-	proxyWithReport translatorutils.ProxyWithReports
-	pluginRegistry  registry.PluginRegistry
-	fullReports     reporter.ResourceReports
 }
 
 func (p XdsSnapWrapper) WithSnapshot(snap *xds.EnvoySnapshot) XdsSnapWrapper {
@@ -55,17 +51,11 @@ func (p XdsSnapWrapper) MarshalJSON() (out []byte, err error) {
 	if !UseDetailedUnmarshalling {
 		// use a new struct to prevent infinite recursion
 		return json.Marshal(struct {
-			snap            *xds.EnvoySnapshot
-			proxyKey        string
-			proxyWithReport translatorutils.ProxyWithReports
-			pluginRegistry  registry.PluginRegistry
-			fullReports     reporter.ResourceReports
+			snap     *xds.EnvoySnapshot
+			proxyKey string
 		}{
-			snap:            p.snap,
-			proxyKey:        p.proxyKey,
-			proxyWithReport: p.proxyWithReport,
-			pluginRegistry:  p.pluginRegistry,
-			fullReports:     p.fullReports,
+			snap:     p.snap,
+			proxyKey: p.proxyKey,
 		})
 	}
 
@@ -79,33 +69,11 @@ func (p XdsSnapWrapper) MarshalJSON() (out []byte, err error) {
 
 	// redact things
 	redact(snap)
-	snapJson := map[string][]any{}
-	for _, r := range snap.Listeners.Items {
-		rJson, _ := protojson.Marshal(r.ResourceProto().(proto.Message))
-		var rAny any
-		json.Unmarshal(rJson, &rAny)
-		snapJson["Listeners"] = append(snapJson["Listeners"], rAny)
-	}
-	for _, r := range snap.Clusters.Items {
-		rJson, _ := protojson.Marshal(r.ResourceProto().(proto.Message))
-		var rAny any
-		json.Unmarshal(rJson, &rAny)
-		snapJson["Clusters"] = append(snapJson["Clusters"], rAny)
-	}
-
-	for _, r := range snap.Routes.Items {
-		rJson, _ := protojson.Marshal(r.ResourceProto().(proto.Message))
-		var rAny any
-		json.Unmarshal(rJson, &rAny)
-		snapJson["Routes"] = append(snapJson["Routes"], rAny)
-	}
-
-	for _, r := range snap.Endpoints.Items {
-		rJson, _ := protojson.Marshal(r.ResourceProto().(proto.Message))
-		var rAny any
-		json.Unmarshal(rJson, &rAny)
-		snapJson["Endpoints"] = append(snapJson["Endpoints"], rAny)
-	}
+	snapJson := map[string]map[string]any{}
+	addToSnap(snapJson, "Listeners", snap.Listeners.Items)
+	addToSnap(snapJson, "Clusters", snap.Clusters.Items)
+	addToSnap(snapJson, "Routes", snap.Routes.Items)
+	addToSnap(snapJson, "Endpoints", snap.Endpoints.Items)
 
 	return json.Marshal(struct {
 		Snap     any
@@ -114,6 +82,19 @@ func (p XdsSnapWrapper) MarshalJSON() (out []byte, err error) {
 		Snap:     snapJson,
 		ProxyKey: p.proxyKey,
 	})
+}
+
+func addToSnap(snapJson map[string]map[string]any, k string, resources map[string]cache.Resource) {
+
+	for rname, r := range resources {
+		rJson, _ := protojson.Marshal(r.ResourceProto().(proto.Message))
+		var rAny any
+		json.Unmarshal(rJson, &rAny)
+		if snapJson[k] == nil {
+			snapJson[k] = map[string]any{}
+		}
+		snapJson[k][rname] = rAny
+	}
 }
 
 func redact(snap *xds.EnvoySnapshot) {
