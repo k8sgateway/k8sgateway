@@ -19,32 +19,41 @@ var _ e2e.NewSuiteFunc = NewTestingSuite
 
 // testingSuite is the entire Suite of tests for the "HttpListenerOptions" feature
 type testingSuite struct {
-	suite.Suite
-	ctx              context.Context
-	testInstallation *e2e.TestInstallation
-	// maps test name to a list of manifests to apply before the test
+	//suite.Suite
+	testdefaults.CommonTestSuiteImpl
+	// ctx              context.Context
+	// testInstallation *e2e.TestInstallation
+	// // maps test name to a list of manifests to apply before the test
 	manifests map[string][]string
 }
 
+// DO_NOT_SUBMIT: Better with embedding or writing the methods directly like intest/kubernetes/e2e/features/headless_svc/gloo_gateway_suite.go?
 func NewTestingSuite(
 	ctx context.Context,
 	testInst *e2e.TestInstallation,
 ) suite.TestingSuite {
 	return &testingSuite{
-		ctx:              ctx,
-		testInstallation: testInst,
+		CommonTestSuiteImpl: *testdefaults.NewCommonTestSuiteImpl(
+			ctx,
+			testInst,
+			[]testdefaults.Resource{
+				&testdefaults.CurlPodResource{},
+			},
+		),
 	}
 }
 
 func (s *testingSuite) SetupSuite() {
 	// Check that the common setup manifest is applied
-	err := s.testInstallation.Actions.Kubectl().ApplyFile(s.ctx, setupManifest)
+	err := s.TestInstallation().Actions.Kubectl().ApplyFile(s.Ctx(), setupManifest)
 	s.NoError(err, "can apply "+setupManifest)
-	s.testInstallation.Assertions.EventuallyObjectsExist(s.ctx, exampleSvc, nginxPod)
+	s.TestInstallation().Assertions.EventuallyObjectsExist(s.Ctx(), exampleSvc, nginxPod)
 	// Check that test app is running
-	s.testInstallation.Assertions.EventuallyPodsRunning(s.ctx, nginxPod.ObjectMeta.GetNamespace(), metav1.ListOptions{
+	s.TestInstallation().Assertions.EventuallyPodsRunning(s.Ctx(), nginxPod.ObjectMeta.GetNamespace(), metav1.ListOptions{
 		LabelSelector: "app.kubernetes.io/name=nginx",
 	})
+
+	testdefaults.InstallResources(s)
 
 	// include gateway manifests for the tests, so we recreate it for each test run
 	s.manifests = map[string][]string{
@@ -55,8 +64,10 @@ func (s *testingSuite) SetupSuite() {
 
 func (s *testingSuite) TearDownSuite() {
 	// Check that the common setup manifest is deleted
-	output, err := s.testInstallation.Actions.Kubectl().DeleteFileWithOutput(s.ctx, setupManifest)
-	s.testInstallation.Assertions.ExpectObjectDeleted(setupManifest, err, output)
+	output, err := s.TestInstallation().Actions.Kubectl().DeleteFileWithOutput(s.Ctx(), setupManifest)
+	s.TestInstallation().Assertions.ExpectObjectDeleted(setupManifest, err, output)
+
+	testdefaults.DeleteResources(s)
 }
 
 func (s *testingSuite) BeforeTest(suiteName, testName string) {
@@ -66,14 +77,14 @@ func (s *testingSuite) BeforeTest(suiteName, testName string) {
 	}
 
 	for _, manifest := range manifests {
-		err := s.testInstallation.Actions.Kubectl().ApplyFile(s.ctx, manifest)
+		err := s.TestInstallation().Actions.Kubectl().ApplyFile(s.Ctx(), manifest)
 		s.Assert().NoError(err, "can apply manifest "+manifest)
 	}
 
 	// we recreate the `Gateway` resource (and thus dynamically provision the proxy pod) for each test run
 	// so let's assert the proxy svc and pod is ready before moving on
-	s.testInstallation.Assertions.EventuallyObjectsExist(s.ctx, proxyService, proxyDeployment)
-	s.testInstallation.Assertions.EventuallyPodsRunning(s.ctx, proxyDeployment.ObjectMeta.GetNamespace(), metav1.ListOptions{
+	s.TestInstallation().Assertions.EventuallyObjectsExist(s.Ctx(), proxyService, proxyDeployment)
+	s.TestInstallation().Assertions.EventuallyPodsRunning(s.Ctx(), proxyDeployment.ObjectMeta.GetNamespace(), metav1.ListOptions{
 		LabelSelector: "app.kubernetes.io/name=gloo-proxy-gw",
 	})
 }
@@ -85,15 +96,15 @@ func (s *testingSuite) AfterTest(suiteName, testName string) {
 	}
 
 	for _, manifest := range manifests {
-		output, err := s.testInstallation.Actions.Kubectl().DeleteFileWithOutput(s.ctx, manifest)
-		s.testInstallation.Assertions.ExpectObjectDeleted(manifest, err, output)
+		output, err := s.TestInstallation().Actions.Kubectl().DeleteFileWithOutput(s.Ctx(), manifest)
+		s.TestInstallation().Assertions.ExpectObjectDeleted(manifest, err, output)
 	}
 }
 
 func (s *testingSuite) TestConfigureHttpListenerOptions() {
 	// Check healthy response and response headers contain server name override from HttpListenerOption
-	s.testInstallation.Assertions.AssertEventualCurlResponse(
-		s.ctx,
+	s.TestInstallation().Assertions.AssertEventualCurlResponse(
+		s.Ctx(),
 		testdefaults.CurlPodExecOpt,
 		[]curl.Option{
 			curl.WithHost(kubeutils.ServiceFQDN(proxyService.ObjectMeta)),
@@ -110,8 +121,8 @@ func (s *testingSuite) TestConfigureHttpListenerOptions() {
 
 func (s *testingSuite) TestConfigureNotAttachedHttpListenerOptions() {
 	// Check healthy response and response headers contain default server name as HttpLisOpt isn't attached
-	s.testInstallation.Assertions.AssertEventualCurlResponse(
-		s.ctx,
+	s.TestInstallation().Assertions.AssertEventualCurlResponse(
+		s.Ctx(),
 		testdefaults.CurlPodExecOpt,
 		[]curl.Option{
 			curl.WithHost(kubeutils.ServiceFQDN(proxyService.ObjectMeta)),
